@@ -1,13 +1,28 @@
+.local-libs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python cache
 __pycache__/
 *.py[cod]
+*.pyo
 *.egg-info/
-dist/
-build/
-.venv/
+
+# Environment & secrets
 .env
+.env.*
+
+# Database files
 *.db
 *.sqlite
 *.sqlite3
-.ruff_cache/
-.pytest_cache/
-.claude/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

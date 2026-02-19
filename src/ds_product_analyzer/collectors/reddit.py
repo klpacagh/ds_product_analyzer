@@ -15,14 +15,9 @@ SUBREDDITS = [
     "shutupandtakemymoney",
     "BuyItForLife",
     "gadgets",
-    "AmazonTopRated",
-    "cooltools",
+    "DidntKnowIWantedThat",  # was AmazonTopRated (403)
+    "TopOfAmazon",           # was cooltools (404)
 ]
-
-# Simple regex to extract product-like mentions from titles
-PRODUCT_PATTERN = re.compile(
-    r"(?:the\s+)?([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+)*(?:\s+(?:Pro|Max|Plus|Mini|Lite|Ultra))?)",
-)
 
 
 class RedditCollector(BaseCollector):
@@ -62,19 +57,17 @@ class RedditCollector(BaseCollector):
         for sub_name in SUBREDDITS:
             try:
                 subreddit = reddit.subreddit(sub_name)
-                for post in subreddit.hot(limit=25):
+                for post in subreddit.hot(limit=50):
                     title = post.title
                     title_lower = title.lower()
 
                     # Check if any keyword appears in the title
                     matched_keywords = [kw for kw in keyword_set if kw in title_lower]
-                    if not matched_keywords:
-                        # Try to extract product name from title formatting
-                        product_name = self._extract_product_name(title)
-                        if not product_name:
-                            continue
-                    else:
-                        product_name = matched_keywords[0]
+
+                    # Extract product name from title
+                    product_name = self._extract_product_name(title)
+                    if not product_name:
+                        continue
 
                     # Calculate upvote velocity (upvotes per hour since creation)
                     age_hours = max(
@@ -115,25 +108,19 @@ class RedditCollector(BaseCollector):
         return signals
 
     def _extract_product_name(self, title: str) -> str | None:
-        """Try to extract a product name from a Reddit post title."""
-        # Remove common prefixes
+        """Extract a product name from a Reddit post title."""
         for prefix in ["[OC]", "[Amazon]", "[Kickstarter]", "Just found", "Check out"]:
             title = title.replace(prefix, "").strip()
 
-        # Look for quoted product names
+        # Prefer quoted product names
         quoted = re.findall(r'"([^"]+)"', title)
         if quoted:
             return quoted[0]
 
-        # Look for product-like capitalized phrases
-        matches = PRODUCT_PATTERN.findall(title)
-        if matches:
-            # Take the longest match as most likely to be the product name
-            return max(matches, key=len)
-
-        # Fallback: use cleaned title if it's short enough
+        # Use the cleaned title directly — these subreddits are product-centric
         clean = title.strip("!?. ")
-        if len(clean) < 80:
-            return clean
-
-        return None
+        if not clean:
+            return None
+        if len(clean) > 120:
+            clean = clean[:120].rsplit(" ", 1)[0]
+        return clean

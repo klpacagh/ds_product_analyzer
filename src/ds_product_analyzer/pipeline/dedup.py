@@ -13,6 +13,17 @@ logger = logging.getLogger(__name__)
 MATCH_THRESHOLD = 80
 
 
+def _fuzzy_score(a: str, b: str) -> int:
+    """Compute fuzzy match score, guarding token_set_ratio against length mismatches."""
+    score = fuzz.token_sort_ratio(a, b)
+    tokens_a = len(a.split())
+    tokens_b = len(b.split())
+    ratio = min(tokens_a, tokens_b) / max(tokens_a, tokens_b)
+    if ratio >= 0.4:
+        score = max(score, fuzz.token_set_ratio(a, b))
+    return score
+
+
 async def find_or_create_product(
     session: AsyncSession,
     raw_name: str,
@@ -40,14 +51,14 @@ async def find_or_create_product(
     best_score = 0
 
     for p in all_products:
-        score = fuzz.token_sort_ratio(normalized, p.canonical_name)
+        score = _fuzzy_score(normalized, p.canonical_name)
         if score > best_score:
             best_score = score
             best_match = p
 
         # Also check aliases
         for a in await _get_aliases(session, p.id):
-            alias_score = fuzz.token_sort_ratio(normalized, a.alias_name)
+            alias_score = _fuzzy_score(normalized, a.alias_name)
             if alias_score > best_score:
                 best_score = alias_score
                 best_match = p

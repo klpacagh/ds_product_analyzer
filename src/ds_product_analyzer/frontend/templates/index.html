@@ -48,8 +48,12 @@
                 <th class="px-4 py-3 text-center">Price</th>
                 <th class="px-4 py-3 text-center">Score</th>
                 <th class="px-4 py-3 text-center">Trend</th>
-                <th class="px-4 py-3 text-center">Google</th>
-                <th class="px-4 py-3 text-center">Reddit</th>
+                <th class="px-4 py-3 text-center">Search</th>
+                <th class="px-4 py-3 text-center">Social</th>
+                <th class="px-4 py-3 text-center">Amazon</th>
+                <th class="px-4 py-3 text-center">Price Fit</th>
+                <th class="px-4 py-3 text-center">Sentiment</th>
+                <th class="px-4 py-3 text-center">Intent</th>
                 <th class="px-4 py-3 text-center">Sources</th>
                 <th class="px-4 py-3 text-right">First Seen</th>
             </tr>
@@ -112,8 +116,18 @@
                         <span class="text-gray-600">—</span>
                     {% endif %}
                 </td>
-                <td class="px-4 py-3 text-center text-gray-300">{{ '%.1f' | format(p.google_velocity) }}</td>
-                <td class="px-4 py-3 text-center text-gray-300">{{ '%.1f' | format(p.reddit_accel) }}</td>
+                <td class="px-4 py-3 text-center text-gray-300">{{ '%.1f' | format(p.search_accel) }}</td>
+                <td class="px-4 py-3 text-center text-gray-300">{{ '%.1f' | format(p.social_velocity) }}</td>
+                <td class="px-4 py-3 text-center text-gray-300">{{ '%.1f' | format(p.amazon_accel) }}</td>
+                <td class="px-4 py-3 text-center text-gray-300">{{ '%.1f' | format(p.price_fit) }}</td>
+                <td class="px-4 py-3 text-center">
+                    {% set s_val = p.sentiment %}
+                    {% set s_color = 'text-green-400' if s_val >= 60
+                                     else 'text-red-400' if s_val <= 40
+                                     else 'text-gray-400' %}
+                    <span class="{{ s_color }}">{{ '%.0f' | format(s_val) }}</span>
+                </td>
+                <td class="px-4 py-3 text-center text-gray-300">{{ '%.1f' | format(p.purchase_intent) }}</td>
                 <td class="px-4 py-3 text-center">
                     <span class="font-mono text-gray-300">{{ p.platform_count }}</span>
                 </td>

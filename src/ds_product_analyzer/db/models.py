@@ -37,6 +37,7 @@ class Product(Base):
     aliases: Mapped[list["ProductAlias"]] = relationship(back_populates="product")
     raw_signals: Mapped[list["RawSignal"]] = relationship(back_populates="product")
     trend_scores: Mapped[list["TrendScore"]] = relationship(back_populates="product")
+    price_history: Mapped[list["PriceHistory"]] = relationship(back_populates="product")
 
 
 class ProductAlias(Base):
@@ -75,8 +76,32 @@ class TrendScore(Base):
     google_velocity: Mapped[float] = mapped_column(Float, default=0.0)
     reddit_accel: Mapped[float] = mapped_column(Float, default=0.0)
     amazon_accel: Mapped[float] = mapped_column(Float, default=0.0)
+    tiktok_accel: Mapped[float] = mapped_column(Float, default=0.0)
     platform_count: Mapped[int] = mapped_column(Integer, default=0)
     sentiment: Mapped[float] = mapped_column(Float, default=0.0)
+    # Enhanced scoring columns
+    search_accel: Mapped[float] = mapped_column(Float, default=0.0)
+    social_velocity: Mapped[float] = mapped_column(Float, default=0.0)
+    price_fit: Mapped[float] = mapped_column(Float, default=0.0)
+    trend_shape: Mapped[float] = mapped_column(Float, default=0.0)
+    purchase_intent: Mapped[float] = mapped_column(Float, default=0.0)
+    recency: Mapped[float] = mapped_column(Float, default=0.0)
+    # Future placeholders
+    ad_longevity: Mapped[float] = mapped_column(Float, default=0.0)
+    review_growth: Mapped[float] = mapped_column(Float, default=0.0)
+    saturation: Mapped[float] = mapped_column(Float, default=0.0)
     scored_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     product: Mapped[Product] = relationship(back_populates="trend_scores")
+
+
+class PriceHistory(Base):
+    __tablename__ = "price_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
+    price: Mapped[float] = mapped_column(Float, nullable=False)
+    source: Mapped[str] = mapped_column(String(50), nullable=False)  # "amazon" or "tiktok"
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    product: Mapped[Product] = relationship(back_populates="price_history")

@@ -17,6 +17,19 @@ class Settings(BaseSettings):
     # Scheduling intervals
     collect_interval_hours: int = 4
     reddit_interval_hours: int = 1
+    amazon_interval_hours: int = 6
+    tiktok_interval_hours: int = 6
+
+    # Amazon
+    amazon_rate_limit_secs: float = 3.0
+
+    # Sentiment
+    sentiment_model: str = "distilbert-base-uncased-finetuned-sst-2-english"
+
+    # Anthropic (for LLM product name extraction)
+    anthropic_api_key: str = ""
+    llm_extraction_model: str = "claude-haiku-4-20250414"
+    llm_extraction_batch_size: int = 40
 
     # App
     log_level: str = "INFO"

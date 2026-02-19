@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ds_product_analyzer.api.app import templates
-from ds_product_analyzer.db.models import Category, Product, RawSignal, TrendScore
+from ds_product_analyzer.db.models import Category, PriceHistory, Product, RawSignal, TrendScore
 from ds_product_analyzer.db.session import get_session
 from ds_product_analyzer.pipeline.runner import run_full_pipeline
 
@@ -81,7 +81,16 @@ async def dashboard(
             "score": ts.score,
             "google_velocity": ts.google_velocity,
             "reddit_accel": ts.reddit_accel,
+            "amazon_accel": ts.amazon_accel,
+            "tiktok_accel": ts.tiktok_accel,
+            "sentiment": ts.sentiment,
             "platform_count": ts.platform_count,
+            "search_accel": ts.search_accel,
+            "social_velocity": ts.social_velocity,
+            "price_fit": ts.price_fit,
+            "trend_shape": ts.trend_shape,
+            "purchase_intent": ts.purchase_intent,
+            "recency": ts.recency,
             "scored_at": ts.scored_at,
             "first_seen": p.first_seen,
             "image_url": p.image_url,
@@ -145,7 +154,49 @@ async def product_detail(
         )
     ).scalars().all()
 
+    # Price history (last 30 entries, chronological)
+    price_history_rows = (
+        await session.execute(
+            select(PriceHistory)
+            .where(PriceHistory.product_id == product_id)
+            .order_by(desc(PriceHistory.recorded_at))
+            .limit(30)
+        )
+    ).scalars().all()
+    price_history_rows = list(reversed(price_history_rows))
+
+    price_chart_labels = [ph.recorded_at.strftime("%m/%d %H:%M") for ph in price_history_rows]
+    price_chart_values = [ph.price for ph in price_history_rows]
+
     latest_score = scores[0] if scores else None
+
+    # Extract unique reference URLs from signal metadata
+    references: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+    for s in signals:
+        if not s.metadata_json:
+            continue
+        try:
+            meta = json.loads(s.metadata_json)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        url = meta.get("product_url") or meta.get("url")
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            references.append({"source": s.source, "url": url})
+
+    # Build signal-level URL lookup for template linking
+    signal_urls: dict[int, str] = {}
+    for s in signals:
+        if not s.metadata_json:
+            continue
+        try:
+            meta = json.loads(s.metadata_json)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        url = meta.get("product_url") or meta.get("url")
+        if url:
+            signal_urls[s.id] = url
 
     # Prepare chart data (reversed for chronological order)
     chart_labels = [s.scored_at.strftime("%m/%d %H:%M") for s in reversed(scores)]
@@ -159,8 +210,13 @@ async def product_detail(
             "latest_score": latest_score,
             "scores": scores,
             "signals": signals,
+            "references": references,
+            "signal_urls": signal_urls,
             "chart_labels": json.dumps(chart_labels),
             "chart_values": json.dumps(chart_values),
+            "price_history": price_history_rows,
+            "price_chart_labels": json.dumps(price_chart_labels),
+            "price_chart_values": json.dumps(price_chart_values),
         },
     )
 
@@ -225,7 +281,16 @@ async def api_products(
             "score": ts.score,
             "google_velocity": ts.google_velocity,
             "reddit_accel": ts.reddit_accel,
+            "amazon_accel": ts.amazon_accel,
+            "tiktok_accel": ts.tiktok_accel,
+            "sentiment": ts.sentiment,
             "platform_count": ts.platform_count,
+            "search_accel": ts.search_accel,
+            "social_velocity": ts.social_velocity,
+            "price_fit": ts.price_fit,
+            "trend_shape": ts.trend_shape,
+            "purchase_intent": ts.purchase_intent,
+            "recency": ts.recency,
             "scored_at": ts.scored_at.isoformat(),
             "sparkline": api_history_map.get(p.id, []),
         }
@@ -252,12 +317,22 @@ async def api_product_detail(
         )
     ).scalars().all()
 
+    price_history_rows = (
+        await session.execute(
+            select(PriceHistory)
+            .where(PriceHistory.product_id == product_id)
+            .order_by(desc(PriceHistory.recorded_at))
+            .limit(30)
+        )
+    ).scalars().all()
+
     return {
         "id": product.id,
         "name": product.canonical_name,
         "category": product.category,
         "image_url": product.image_url,
         "description": product.description,
+        "source_url": product.source_url,
         "price_low": product.price_low,
         "price_high": product.price_high,
         "first_seen": product.first_seen.isoformat() if product.first_seen else None,
@@ -266,10 +341,27 @@ async def api_product_detail(
                 "score": s.score,
                 "google_velocity": s.google_velocity,
                 "reddit_accel": s.reddit_accel,
+                "amazon_accel": s.amazon_accel,
+                "tiktok_accel": s.tiktok_accel,
+                "sentiment": s.sentiment,
                 "platform_count": s.platform_count,
+                "search_accel": s.search_accel,
+                "social_velocity": s.social_velocity,
+                "price_fit": s.price_fit,
+                "trend_shape": s.trend_shape,
+                "purchase_intent": s.purchase_intent,
+                "recency": s.recency,
                 "scored_at": s.scored_at.isoformat(),
             }
             for s in scores
+        ],
+        "price_history": [
+            {
+                "price": ph.price,
+                "source": ph.source,
+                "recorded_at": ph.recorded_at.isoformat(),
+            }
+            for ph in price_history_rows
         ],
     }
 

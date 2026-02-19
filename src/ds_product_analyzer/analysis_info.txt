@@ -1,0 +1,267 @@
+Good — this is the right question.
+
+You don’t find “trending products.”
+
+You detect products that have trend attributes.
+
+Here’s a structured framework you can actually build into a scoring model.
+
+🔥 I. Demand Acceleration Features (Early Signal)
+
+These tell you something is starting to move.
+
+1️⃣ Search Growth Velocity
+
+Source:
+
+Google Trends
+
+Amazon search volume tools
+
+Features to track:
+
+7-day growth %
+
+30-day growth %
+
+Slope of trendline
+
+Consecutive week increases
+
+“Breakout” label (Google)
+
+Key metric:
+
+Acceleration = (Last 7-day avg - Previous 7-day avg) / Previous 7-day avg
+
+
+You want:
+
+Sustained growth
+
+Not 1-day spike
+
+2️⃣ Social Velocity (Virality Indicators)
+
+Source:
+
+TikTok
+
+Instagram
+
+Pinterest
+
+Features:
+
+Hashtag growth rate
+
+% increase in videos using keyword
+
+Average views per video
+
+Creator diversity (not just 1 influencer)
+
+Power metric:
+
+Velocity Score = (New posts last 7 days / Prior 7 days)
+
+
+If it doubles → early-stage growth.
+
+💰 II. Monetization Validation Features
+
+Trend ≠ profitable.
+
+These confirm buyers are actually paying.
+
+3️⃣ Ad Longevity
+
+Source:
+
+Meta Ad Library
+
+TikTok Ads Library
+
+Features:
+
+Days ad has been running
+
+Engagement growth over time
+
+Number of duplicate creatives
+
+Strong signal:
+
+21+ days running = likely profitable
+
+45+ days = very strong validation
+
+4️⃣ Review Velocity
+
+Source:
+
+Amazon
+
+AliExpress
+
+Etsy
+
+Features:
+
+Reviews added in last 30 days
+
+Review growth rate %
+
+Rating consistency
+
+Why this matters:
+Review growth = real purchases.
+
+🧠 III. Psychological & Product Attributes
+
+These matter more than raw data.
+
+Trending products often share structural traits.
+
+5️⃣ “Scroll-Stopping” Factor
+
+Binary feature:
+
+Can it be demonstrated in 3 seconds?
+
+Is the benefit visually obvious?
+
+Example traits:
+
+Transforms something
+
+Fixes visible problem
+
+Before/after effect
+
+6️⃣ Problem Intensity
+
+Score product on:
+
+Pain relief (high)
+
+Time saving (medium-high)
+
+Vanity enhancement (high)
+
+Entertainment (medium)
+
+Convenience (medium)
+
+Pain > convenience in performance.
+
+7️⃣ Price Sweet Spot
+
+Most winning dropship items:
+
+$20–$60 retail
+
+Lightweight
+
+Cheap to ship
+
+Not electronics-heavy (unless margin high)
+
+Add binary flags:
+
+Under 1 lb
+
+Under $10 landed cost
+
+3x markup possible
+
+📈 IV. Saturation & Competition Features
+
+You need to subtract points too.
+
+8️⃣ Store Saturation
+
+Features:
+
+Number of Shopify stores selling same SKU
+
+Number of identical creatives
+
+Generic AliExpress photos everywhere
+
+High saturation = lower opportunity score.
+
+9️⃣ Trend Shape Pattern
+
+Look at Google Trends curve.
+
+Bad shape:
+
+Sharp spike → fast drop (fad)
+
+Good shape:
+
+Gradual consistent incline
+
+You can quantify this using:
+
+Standard deviation
+
+Spike ratio
+
+Trend smoothness
+
+🧮 V. Composite Trend Score Example
+
+Here’s how you’d structure it.
+
+Trend Score =
+0.30 × Search Acceleration
++ 0.20 × Social Velocity
++ 0.20 × Ad Longevity
++ 0.15 × Review Growth
++ 0.10 × Problem Intensity Score
+- 0.15 × Saturation Score
+
+
+Anything > 70 = manual review.
+
+🧠 VI. Advanced Features (Edge Layer)
+
+If you want to go deeper:
+
+1️⃣ Sentiment Mining
+
+Scrape TikTok comments:
+
+“Where do I buy?”
+
+“Need this”
+
+“Link?”
+
+High purchase intent phrases = strong signal.
+
+2️⃣ Category Cluster Growth
+
+Instead of tracking product,
+track niche growth.
+
+Example:
+“Posture correction”
+“Cold therapy”
+“Desk ergonomics”
+
+Category-level growth often precedes product explosion.
+
+3️⃣ Seasonality Coefficient
+
+Is it:
+
+Evergreen
+
+Seasonal spike
+
+Event-driven (e.g., back to school)
+
+You don’t want something that dies in 3 weeks unless you’re fast.

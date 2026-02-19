@@ -7,10 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ds_product_analyzer.collectors.base import RawSignalData
 from ds_product_analyzer.collectors.google_trends import GoogleTrendsCollector
 from ds_product_analyzer.collectors.reddit import RedditCollector
-from ds_product_analyzer.db.models import Category, RawSignal
+from ds_product_analyzer.collectors.amazon import AmazonMoversCollector
+from ds_product_analyzer.collectors.tiktok import TikTokCollector
+from ds_product_analyzer.db.models import Category, PriceHistory, Product, RawSignal
 from ds_product_analyzer.db.session import async_session_factory
 
 from .dedup import find_or_create_product
+from .llm_extract import extract_and_filter
+from .normalizer import normalize_product_name
 from .trend_scorer import score_all_products
 
 logger = logging.getLogger(__name__)
@@ -77,11 +81,139 @@ async def run_reddit_collection():
     collector = RedditCollector()
     signals = await collector.collect(all_keywords)
     logger.info("Reddit collected %d signals", len(signals))
+    signals = await extract_and_filter(signals)
 
     async with async_session_factory() as session:
         stored = await store_signals(session, signals)
+        await _enrich_source_urls(session, signals)
     logger.info("Stored %d Reddit signals", stored)
     return stored
+
+
+async def run_amazon_collection():
+    """Run Amazon Movers & Shakers collection for all categories."""
+    logger.info("Starting Amazon collection...")
+    keywords_by_cat = await get_all_keywords()
+    all_keywords = [kw for kws in keywords_by_cat.values() for kw in kws]
+
+    collector = AmazonMoversCollector()
+    signals = await collector.collect(all_keywords)
+    logger.info("Amazon collected %d signals", len(signals))
+    signals = await extract_and_filter(signals)
+
+    async with async_session_factory() as session:
+        stored = await store_signals(session, signals)
+        await _enrich_products_from_amazon(session, signals)
+    logger.info("Stored %d Amazon signals", stored)
+    return stored
+
+
+async def run_tiktok_collection():
+    """Run TikTok collection."""
+    logger.info("Starting TikTok collection...")
+    keywords_by_cat = await get_all_keywords()
+    all_keywords = [kw for kws in keywords_by_cat.values() for kw in kws]
+
+    collector = TikTokCollector()
+    signals = await collector.collect(all_keywords)
+    logger.info("TikTok collected %d signals", len(signals))
+    signals = await extract_and_filter(signals)
+
+    async with async_session_factory() as session:
+        stored = await store_signals(session, signals)
+        await _record_price_history(session, signals, "tiktok")
+        await _enrich_source_urls(session, signals)
+    logger.info("Stored %d TikTok signals", stored)
+    return stored
+
+
+async def _record_price_history(
+    session: AsyncSession, signals: list[RawSignalData], source: str
+) -> None:
+    """Record price history from signals and update Product price range."""
+    for sig in signals:
+        if not sig.metadata:
+            continue
+
+        price = sig.metadata.get("price")
+        if price is None:
+            continue
+
+        product = (
+            await session.execute(
+                select(Product).where(Product.canonical_name == normalize_product_name(sig.product_name))
+            )
+        ).scalar_one_or_none()
+
+        if not product:
+            continue
+
+        price_val = float(price)
+
+        session.add(PriceHistory(
+            product_id=product.id,
+            price=price_val,
+            source=source,
+        ))
+
+        if product.price_low is None or price_val < product.price_low:
+            product.price_low = price_val
+        if product.price_high is None or price_val > product.price_high:
+            product.price_high = price_val
+
+    await session.commit()
+
+
+async def _enrich_products_from_amazon(
+    session: AsyncSession, signals: list[RawSignalData]
+) -> None:
+    """Update Product image_url from Amazon metadata and record prices."""
+    await _record_price_history(session, signals, "amazon")
+
+    for sig in signals:
+        if not sig.metadata:
+            continue
+
+        image_url = sig.metadata.get("image_url")
+        if not image_url:
+            continue
+
+        product = (
+            await session.execute(
+                select(Product).where(Product.canonical_name == normalize_product_name(sig.product_name))
+            )
+        ).scalar_one_or_none()
+
+        if not product:
+            continue
+
+        if product.image_url is None:
+            product.image_url = image_url
+            logger.debug("Enriched product '%s' image from Amazon", product.canonical_name)
+
+        product_url = sig.metadata.get("product_url")
+        if product_url and product.source_url is None:
+            product.source_url = product_url
+
+    await session.commit()
+
+
+async def _enrich_source_urls(session: AsyncSession, signals: list[RawSignalData]) -> None:
+    """Set Product.source_url from signal metadata (write-once)."""
+    for sig in signals:
+        if not sig.metadata:
+            continue
+        url = sig.metadata.get("product_url") or sig.metadata.get("url")
+        if not url:
+            continue
+        product = (
+            await session.execute(
+                select(Product).where(Product.canonical_name == normalize_product_name(sig.product_name))
+            )
+        ).scalar_one_or_none()
+        if product and product.source_url is None:
+            product.source_url = url
+    await session.commit()
 
 
 async def run_scoring():
@@ -98,6 +230,8 @@ async def run_full_pipeline():
     logger.info("=== Full pipeline run starting ===")
     google_count = 0
     reddit_count = 0
+    amazon_count = 0
+    tiktok_count = 0
 
     try:
         google_count = await run_google_collection()
@@ -109,9 +243,25 @@ async def run_full_pipeline():
     except Exception as e:
         logger.error("Reddit collection failed: %s", e)
 
+    try:
+        amazon_count = await run_amazon_collection()
+    except Exception as e:
+        logger.error("Amazon collection failed: %s", e)
+
+    try:
+        tiktok_count = await run_tiktok_collection()
+    except Exception as e:
+        logger.error("TikTok collection failed: %s", e)
+
     scored = await run_scoring()
     logger.info(
-        "=== Pipeline complete: google=%d reddit=%d scored=%d ===",
-        google_count, reddit_count, scored,
+        "=== Pipeline complete: google=%d reddit=%d amazon=%d tiktok=%d scored=%d ===",
+        google_count, reddit_count, amazon_count, tiktok_count, scored,
     )
-    return {"google": google_count, "reddit": reddit_count, "scored": scored}
+    return {
+        "google": google_count,
+        "reddit": reddit_count,
+        "amazon": amazon_count,
+        "tiktok": tiktok_count,
+        "scored": scored,
+    }
