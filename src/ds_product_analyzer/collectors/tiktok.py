@@ -84,7 +84,7 @@ HEADERS = {
 _PRODUCT_HASHTAGS = [
     "tiktokmademebuyit",
     "amazonfinds",
-    "tiktokshop",
+    "tiktokfinds",
     "viralproducts",
 ]
 
@@ -102,6 +102,14 @@ _FILLER_RE = re.compile(
     r"follow for more|check out|comment below|POV:|you guys)",
 )
 
+# Patterns that identify tutorial/seller content — not a product showcase
+_NON_PRODUCT_RE = re.compile(
+    r"(?i)\b(how\s+to|tutorial|step[\s-]+by[\s-]+step|beginner'?s?\s+guide|"
+    r"set\s+up|shop\s+setup|setting\s+up|start\s+(a\s+|your\s+)?shop|"
+    r"open\s+(a\s+)?shop|selling\s+on|make\s+money|earn\s+(online|money)|"
+    r"passive\s+income|dropship(?:ping)?|supplier)\b"
+)
+
 
 def _extract_product_name(desc: str) -> str | None:
     """Best-effort extraction of a product name from a TikTok video description.
@@ -110,6 +118,10 @@ def _extract_product_name(desc: str) -> str | None:
     returns the cleaned text (capped at 120 chars) or None if nothing useful
     remains.
     """
+    # Reject tutorial/shop-setup/sell-side content before any cleaning
+    if _NON_PRODUCT_RE.search(desc):
+        return None
+
     text = _HASHTAG_RE.sub("", desc)
     text = _MENTION_RE.sub("", text)
     text = _EMOJI_RE.sub("", text)

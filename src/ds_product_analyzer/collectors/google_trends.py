@@ -4,12 +4,13 @@ import time
 
 from pytrends.request import TrendReq
 
+from ds_product_analyzer.config import settings
+
 from .base import BaseCollector, RawSignalData
 
 logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 5
-RATE_LIMIT_SECS = 2.0
 
 
 class GoogleTrendsCollector(BaseCollector):
@@ -27,7 +28,7 @@ class GoogleTrendsCollector(BaseCollector):
         for batch in batches:
             batch_signals = await asyncio.to_thread(self._collect_batch, batch)
             signals.extend(batch_signals)
-            await asyncio.sleep(RATE_LIMIT_SECS)
+            await asyncio.sleep(settings.google_trends_rate_limit_secs)
 
         return signals
 
@@ -69,7 +70,7 @@ class GoogleTrendsCollector(BaseCollector):
         except Exception as e:
             logger.warning("Interest over time failed for %s: %s", keywords, e)
 
-        time.sleep(RATE_LIMIT_SECS)
+        time.sleep(settings.google_trends_rate_limit_secs)
 
         # Related queries — look for breakout terms
         try:

@@ -10,14 +10,6 @@
     <!-- Left: Product info + score breakdown -->
     <div class="lg:col-span-1 space-y-6">
         <div class="bg-gray-900 border border-gray-800 rounded-xl p-6">
-            {% if product.image_url %}
-            <img src="{{ product.image_url }}" alt="{{ product.canonical_name }}"
-                 class="w-full max-h-48 object-contain rounded-lg mb-4 bg-gray-800">
-            {% else %}
-            <div class="w-full h-32 bg-gray-800 rounded-lg mb-4 flex items-center justify-center text-gray-600 text-sm">
-                No image available
-            </div>
-            {% endif %}
             <h1 class="text-2xl font-bold mb-2">{{ product.canonical_name | title }}</h1>
             {% if product.description %}
             <p class="text-gray-400 text-sm mb-3">{{ product.description }}</p>
@@ -171,6 +163,43 @@
             </p>
             {% endif %}
         </div>
+
+        <!-- Engagement Signals card -->
+        {% if engagement.tiktok_views or engagement.reddit_upvotes %}
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-6">
+          <h2 class="text-lg font-semibold mb-4">Engagement Signals</h2>
+          <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+            {% if engagement.tiktok_views %}
+            <div class="text-center">
+              <div class="text-2xl font-bold text-pink-500">{{ "{:,}".format(engagement.tiktok_views) }}</div>
+              <div class="text-sm text-gray-500">TikTok Views</div>
+            </div>
+            <div class="text-center">
+              <div class="text-2xl font-bold text-pink-500">{{ "{:,}".format(engagement.tiktok_likes) }}</div>
+              <div class="text-sm text-gray-500">TikTok Likes</div>
+            </div>
+            <div class="text-center">
+              <div class="text-2xl font-bold text-pink-500">{{ "{:,}".format(engagement.tiktok_shares) }}</div>
+              <div class="text-sm text-gray-500">TikTok Shares</div>
+            </div>
+            <div class="text-center">
+              <div class="text-2xl font-bold text-pink-500">{{ "{:,}".format(engagement.tiktok_comments) }}</div>
+              <div class="text-sm text-gray-500">TikTok Comments</div>
+            </div>
+            {% endif %}
+            {% if engagement.reddit_upvotes %}
+            <div class="text-center">
+              <div class="text-2xl font-bold text-orange-500">{{ "{:,}".format(engagement.reddit_upvotes) }}</div>
+              <div class="text-sm text-gray-500">Reddit Upvotes</div>
+            </div>
+            <div class="text-center">
+              <div class="text-2xl font-bold text-orange-500">{{ "{:,}".format(engagement.reddit_comments) }}</div>
+              <div class="text-sm text-gray-500">Reddit Comments</div>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+        {% endif %}
 
         <!-- Raw signals table -->
         <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">

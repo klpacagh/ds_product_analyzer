@@ -37,13 +37,18 @@ async def find_or_create_product(
     stmt = select(Product).where(Product.canonical_name == normalized)
     product = (await session.execute(stmt)).scalar_one_or_none()
     if product:
+        if product.category is None and category:
+            product.category = category
         return product
 
     # 2. Exact match on alias
     stmt = select(ProductAlias).where(ProductAlias.alias_name == normalized)
     alias = (await session.execute(stmt)).scalar_one_or_none()
     if alias:
-        return await session.get(Product, alias.product_id)
+        product = await session.get(Product, alias.product_id)
+        if product.category is None and category:
+            product.category = category
+        return product
 
     # 3. Fuzzy match against all known names
     all_products = (await session.execute(select(Product))).scalars().all()
@@ -70,6 +75,8 @@ async def find_or_create_product(
             alias_name=normalized,
             source=source,
         ))
+        if best_match.category is None and category:
+            best_match.category = category
         logger.debug("Matched '%s' to '%s' (score=%d)", normalized, best_match.canonical_name, best_score)
         return best_match
 

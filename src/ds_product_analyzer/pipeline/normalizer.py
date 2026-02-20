@@ -1,6 +1,6 @@
 import re
 
-_PLATFORM_STOPWORDS = {"amazon", "walmart", "ebay", "tiktok", "reddit", "aliexpress", "etsy"}
+_PLATFORM_STOPWORDS = {"amazon", "walmart", "ebay", "tiktok", "reddit", "aliexpress", "etsy", "target"}
 
 
 def normalize_product_name(name: str) -> str:

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 
@@ -9,6 +10,10 @@ from ds_product_analyzer.collectors.google_trends import GoogleTrendsCollector
 from ds_product_analyzer.collectors.reddit import RedditCollector
 from ds_product_analyzer.collectors.amazon import AmazonMoversCollector
 from ds_product_analyzer.collectors.tiktok import TikTokCollector
+from ds_product_analyzer.collectors.etsy import EtsyCollector
+from ds_product_analyzer.collectors.walmart import WalmartCollector
+from ds_product_analyzer.collectors.target import TargetCollector
+from ds_product_analyzer.config import settings
 from ds_product_analyzer.db.models import Category, PriceHistory, Product, RawSignal
 from ds_product_analyzer.db.session import async_session_factory
 
@@ -36,8 +41,9 @@ async def store_signals(session: AsyncSession, signals: list[RawSignalData]) -> 
     """Store raw signals in the database and link to products via dedup."""
     count = 0
     for sig in signals:
+        category = sig.metadata.get("category") if sig.metadata else None
         product = await find_or_create_product(
-            session, sig.product_name, sig.source
+            session, sig.product_name, sig.source, category=category
         )
         raw = RawSignal(
             product_id=product.id,
@@ -127,6 +133,73 @@ async def run_tiktok_collection():
     return stored
 
 
+async def run_etsy_collection():
+    """Run Etsy collection for all categories."""
+    logger.info("Starting Etsy collection...")
+    keywords_by_cat = await get_all_keywords()
+    all_keywords = [kw for kws in keywords_by_cat.values() for kw in kws]
+
+    collector = EtsyCollector()
+    signals = await collector.collect(all_keywords)
+    logger.info("Etsy collected %d signals", len(signals))
+    signals = await extract_and_filter(signals)
+
+    async with async_session_factory() as session:
+        stored = await store_signals(session, signals)
+        await _record_price_history(session, signals, "etsy")
+        await _enrich_source_urls(session, signals)
+    logger.info("Stored %d Etsy signals", stored)
+    return stored
+
+
+async def run_walmart_collection():
+    """Run Walmart bestseller collection."""
+    logger.info("Starting Walmart collection...")
+    keywords_by_cat = await get_all_keywords()
+    all_keywords = [kw for kws in keywords_by_cat.values() for kw in kws]
+
+    collector = WalmartCollector()
+    signals = await collector.collect(all_keywords)
+    logger.info("Walmart collected %d signals", len(signals))
+    signals = await extract_and_filter(signals)
+
+    async with async_session_factory() as session:
+        stored = await store_signals(session, signals)
+        await _record_price_history(session, signals, "walmart")
+        await _enrich_source_urls(session, signals)
+    logger.info("Stored %d Walmart signals", stored)
+    return stored
+
+
+async def run_target_collection():
+    """Run Target trending collection."""
+    logger.info("Starting Target collection...")
+    keywords_by_cat = await get_all_keywords()
+    all_keywords = [kw for kws in keywords_by_cat.values() for kw in kws]
+
+    collector = TargetCollector()
+    signals = await collector.collect(all_keywords)
+    logger.info("Target collected %d signals", len(signals))
+    signals = await extract_and_filter(signals)
+
+    async with async_session_factory() as session:
+        stored = await store_signals(session, signals)
+        await _record_price_history(session, signals, "target")
+        await _enrich_source_urls(session, signals)
+    logger.info("Stored %d Target signals", stored)
+    return stored
+
+
+async def _write_price_for_product(
+    session: AsyncSession, product: Product, price_val: float, source: str
+) -> None:
+    session.add(PriceHistory(product_id=product.id, price=price_val, source=source))
+    if product.price_low is None or price_val < product.price_low:
+        product.price_low = price_val
+    if product.price_high is None or price_val > product.price_high:
+        product.price_high = price_val
+
+
 async def _record_price_history(
     session: AsyncSession, signals: list[RawSignalData], source: str
 ) -> None:
@@ -148,18 +221,7 @@ async def _record_price_history(
         if not product:
             continue
 
-        price_val = float(price)
-
-        session.add(PriceHistory(
-            product_id=product.id,
-            price=price_val,
-            source=source,
-        ))
-
-        if product.price_low is None or price_val < product.price_low:
-            product.price_low = price_val
-        if product.price_high is None or price_val > product.price_high:
-            product.price_high = price_val
+        await _write_price_for_product(session, product, float(price), source)
 
     await session.commit()
 
@@ -216,6 +278,37 @@ async def _enrich_source_urls(session: AsyncSession, signals: list[RawSignalData
     await session.commit()
 
 
+async def run_price_enrichment():
+    """Fetch current prices for products with known Amazon URLs."""
+    from ds_product_analyzer.collectors.amazon import fetch_product_price
+
+    async with async_session_factory() as session:
+        products = (
+            await session.execute(
+                select(Product).where(
+                    Product.source_url.like("%amazon.com/dp/%")
+                )
+            )
+        ).scalars().all()
+
+    logger.info("Price enrichment: %d products with Amazon URLs", len(products))
+    enriched = 0
+    for product in products:
+        price = await asyncio.to_thread(fetch_product_price, product.source_url)
+        if price is None:
+            continue
+        async with async_session_factory() as session:
+            product_row = await session.get(Product, product.id)
+            if product_row:
+                await _write_price_for_product(session, product_row, price, "amazon")
+                await session.commit()
+                enriched += 1
+        await asyncio.sleep(settings.amazon_rate_limit_secs)
+
+    logger.info("Price enrichment complete: %d prices updated", enriched)
+    return enriched
+
+
 async def run_scoring():
     """Score all products."""
     logger.info("Starting scoring pipeline...")
@@ -232,6 +325,9 @@ async def run_full_pipeline():
     reddit_count = 0
     amazon_count = 0
     tiktok_count = 0
+    etsy_count = 0
+    walmart_count = 0
+    target_count = 0
 
     try:
         google_count = await run_google_collection()
@@ -253,15 +349,35 @@ async def run_full_pipeline():
     except Exception as e:
         logger.error("TikTok collection failed: %s", e)
 
+    try:
+        etsy_count = await run_etsy_collection()
+    except Exception as e:
+        logger.error("Etsy collection failed: %s", e)
+
+    try:
+        walmart_count = await run_walmart_collection()
+    except Exception as e:
+        logger.error("Walmart collection failed: %s", e)
+
+    try:
+        target_count = await run_target_collection()
+    except Exception as e:
+        logger.error("Target collection failed: %s", e)
+
     scored = await run_scoring()
     logger.info(
-        "=== Pipeline complete: google=%d reddit=%d amazon=%d tiktok=%d scored=%d ===",
-        google_count, reddit_count, amazon_count, tiktok_count, scored,
+        "=== Pipeline complete: google=%d reddit=%d amazon=%d tiktok=%d "
+        "etsy=%d walmart=%d target=%d scored=%d ===",
+        google_count, reddit_count, amazon_count, tiktok_count,
+        etsy_count, walmart_count, target_count, scored,
     )
     return {
         "google": google_count,
         "reddit": reddit_count,
         "amazon": amazon_count,
         "tiktok": tiktok_count,
+        "etsy": etsy_count,
+        "walmart": walmart_count,
+        "target": target_count,
         "scored": scored,
     }

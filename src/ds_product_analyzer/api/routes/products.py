@@ -54,7 +54,7 @@ async def dashboard(
     stmt = stmt.where(
         or_(Product.price_high.is_(None), Product.price_high <= max_price)
     )
-    stmt = stmt.limit(100)
+    stmt = stmt.limit(1000)
 
     results = (await session.execute(stmt)).all()
 
@@ -72,6 +72,17 @@ async def dashboard(
                 history_map[pid].append(score)
         # Reverse to chronological order (oldest first)
         history_map = {pid: list(reversed(scores)) for pid, scores in history_map.items()}
+
+    # Distinct signal sources per product (for Social Signals platform display)
+    sources_map: dict[int, list[str]] = defaultdict(list)
+    if product_ids:
+        sources_rows = (await session.execute(
+            select(RawSignal.product_id, RawSignal.source)
+            .where(RawSignal.product_id.in_(product_ids))
+            .distinct()
+        )).all()
+        for pid, src in sources_rows:
+            sources_map[pid].append(src)
 
     products = [
         {
@@ -98,6 +109,8 @@ async def dashboard(
             "price_low": p.price_low,
             "price_high": p.price_high,
             "sparkline": history_map.get(p.id, []),
+            "is_confirmed": ts.amazon_accel > 0,
+            "sources": sources_map.get(p.id, []),
         }
         for p, ts in results
     ]
@@ -185,6 +198,28 @@ async def product_detail(
             seen_urls.add(url)
             references.append({"source": s.source, "url": url})
 
+    # Build per-source engagement summary from metadata
+    engagement = {
+        "tiktok_views": 0, "tiktok_likes": 0,
+        "tiktok_shares": 0, "tiktok_comments": 0,
+        "reddit_upvotes": 0, "reddit_comments": 0,
+    }
+    for s in signals:
+        if not s.metadata_json:
+            continue
+        try:
+            meta = json.loads(s.metadata_json)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if s.source == "tiktok":
+            engagement["tiktok_views"]    = max(engagement["tiktok_views"],    meta.get("play_count",    0) or 0)
+            engagement["tiktok_likes"]    = max(engagement["tiktok_likes"],    meta.get("like_count",    0) or 0)
+            engagement["tiktok_shares"]   = max(engagement["tiktok_shares"],   meta.get("share_count",   0) or 0)
+            engagement["tiktok_comments"] = max(engagement["tiktok_comments"], meta.get("comment_count", 0) or 0)
+        elif s.source == "reddit":
+            engagement["reddit_upvotes"]  += meta.get("score",        0) or 0
+            engagement["reddit_comments"] += meta.get("num_comments", 0) or 0
+
     # Build signal-level URL lookup for template linking
     signal_urls: dict[int, str] = {}
     for s in signals:
@@ -212,6 +247,7 @@ async def product_detail(
             "signals": signals,
             "references": references,
             "signal_urls": signal_urls,
+            "engagement": engagement,
             "chart_labels": json.dumps(chart_labels),
             "chart_values": json.dumps(chart_values),
             "price_history": price_history_rows,
@@ -226,7 +262,7 @@ async def product_detail(
 
 @router.get("/api/products")
 async def api_products(
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=1000),
     category: str | None = None,
     min_score: float = Query(0, ge=0),
     session: AsyncSession = Depends(get_session),

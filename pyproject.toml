@@ -22,6 +22,7 @@ dependencies = [
     "torch>=2.2",
     "playwright>=1.42",
     "anthropic>=0.42",
+    "playwright-stealth>=2.0.2",
 ]
 
 [project.optional-dependencies]

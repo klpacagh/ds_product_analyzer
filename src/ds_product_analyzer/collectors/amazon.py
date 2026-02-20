@@ -18,14 +18,20 @@ from .base import BaseCollector, RawSignalData
 
 logger = logging.getLogger(__name__)
 
-# Map our 6 categories to Amazon M&S URL slugs
+# Map our categories to Amazon M&S URL slugs
 CATEGORY_SLUGS = {
-    "electronics": "electronics",
+    "electronics":  "electronics",
     "home-kitchen": "home-garden",
-    "beauty": "beauty",
-    "sports": "sports-outdoors",
-    "pets": "pet-supplies",
-    "toys": "toys-and-games",
+    "beauty":       "beauty",
+    "sports":       "sports-outdoors",
+    "pets":         "pet-supplies",
+    "toys":         "toys-and-games",
+    "office":       "office-products",
+    "health":       "health-personal-care",
+    "clothing":     "clothing-accessories-jewels-watches",
+    "tools":        "tools",
+    "automotive":   "automotive-parts-accessories",
+    "video-games":  "videogames",
 }
 
 BASE_URL = "https://www.amazon.com/gp/movers-and-shakers/{slug}/"
@@ -100,19 +106,28 @@ def _parse_products(html: str) -> list[dict]:
         product["name"] = name_el.get_text(strip=True) if name_el else None
 
         # Rank change percentage
-        change_el = card.select_one(".zg-percent-change span") or card.select_one(
-            "[class*='percent']"
+        change_el = (
+            card.select_one(".zg-grid-pct-change")
+            or card.select_one(".zg-percent-change span")
+            or card.select_one("[class*='percent']")
         )
         raw_change = change_el.get_text(strip=True) if change_el else None
         product["percent_change"] = _parse_percent_change(raw_change)
 
-        # Price
-        price_el = card.select_one(".p13n-sc-price") or card.select_one(
-            "span.a-price .a-offscreen"
-        )
-        product["price"] = _parse_price(
-            price_el.get_text(strip=True) if price_el else None
-        )
+        # Price — cascade from exact legacy class to attribute-contains fallbacks
+        CARD_PRICE_SELECTORS = [
+            ".p13n-sc-price",
+            "[class*='p13n-sc-price']",
+            "[class*='sc-price']",
+            "span.a-price .a-offscreen",
+            ".a-color-price",
+        ]
+        price_el = None
+        for sel in CARD_PRICE_SELECTORS:
+            price_el = card.select_one(sel)
+            if price_el:
+                break
+        product["price"] = _parse_price(price_el.get_text(strip=True) if price_el else None)
 
         # Rating
         rating_el = card.select_one("span.a-icon-alt")
@@ -133,11 +148,32 @@ def _parse_products(html: str) -> list[dict]:
     return products
 
 
+def fetch_product_price(url: str) -> float | None:
+    """Fetch current price from an Amazon product detail page."""
+    PRICE_SELECTORS = [
+        "#corePriceDisplay_desktop_feature_div .a-price .a-offscreen",
+        "#priceblock_ourprice",
+        "#priceblock_dealprice",
+        "span.a-price .a-offscreen",
+    ]
+    with httpx.Client(headers=HEADERS, timeout=20.0) as client:
+        resp = client.get(url, follow_redirects=True)
+    if resp.status_code != 200 or "captcha" in resp.text.lower():
+        return None
+    soup = BeautifulSoup(resp.text, "html.parser")
+    for sel in PRICE_SELECTORS:
+        el = soup.select_one(sel)
+        if el:
+            return _parse_price(el.get_text(strip=True))
+    return None
+
+
 class AmazonMoversCollector(BaseCollector):
     source_name = "amazon"
 
     def __init__(self):
         self._rate_limit = settings.amazon_rate_limit_secs
+        self._pages_per_category: int = settings.amazon_pages_per_category
 
     async def collect(self, keywords: list[str]) -> list[RawSignalData]:
         """Scrape Amazon M&S pages for all mapped categories."""
@@ -149,61 +185,66 @@ class AmazonMoversCollector(BaseCollector):
 
         with httpx.Client(headers=HEADERS, timeout=30.0) as client:
             for i, (cat_name, slug) in enumerate(CATEGORY_SLUGS.items()):
-                if i > 0:
-                    time.sleep(self._rate_limit)
+                base_url = BASE_URL.format(slug=slug)
+                for page in range(1, self._pages_per_category + 1):
+                    if page > 1 or i > 0:
+                        time.sleep(self._rate_limit)
 
-                url = BASE_URL.format(slug=slug)
-                try:
-                    resp = client.get(url, follow_redirects=True)
-                except httpx.HTTPError as e:
-                    logger.warning("Amazon HTTP error for %s: %s", cat_name, e)
-                    continue
+                    page_url = f"{base_url}?pg={page}"
+                    try:
+                        resp = client.get(page_url, follow_redirects=True)
+                    except httpx.HTTPError as e:
+                        logger.warning("Amazon HTTP error for %s page %d: %s", cat_name, page, e)
+                        break
 
-                if resp.status_code != 200:
-                    logger.warning("Amazon returned %d for %s", resp.status_code, cat_name)
-                    continue
+                    if resp.status_code != 200:
+                        logger.warning("Amazon returned %d for %s page %d", resp.status_code, cat_name, page)
+                        break
 
-                # CAPTCHA detection
-                if "captcha" in resp.text.lower() or len(resp.text) < 1000:
-                    logger.warning("Amazon CAPTCHA or empty response for %s", cat_name)
-                    continue
+                    # CAPTCHA detection
+                    if "captcha" in resp.text.lower() or len(resp.text) < 1000:
+                        logger.warning("Amazon CAPTCHA or empty response for %s page %d", cat_name, page)
+                        break
 
-                products = _parse_products(resp.text)
-                logger.info("Amazon M&S %s: found %d products", cat_name, len(products))
+                    products = _parse_products(resp.text)
+                    logger.info("Amazon M&S %s page %d: found %d products", cat_name, page, len(products))
 
-                for product in products:
-                    name = product["name"]
-                    name_lower = name.lower()
+                    if not products:
+                        break
 
-                    # BSR momentum signal (percent change)
-                    pct = product.get("percent_change")
-                    if pct is not None and pct > 0:
+                    for product in products:
+                        name = product["name"]
+                        name_lower = name.lower()
+
+                        # BSR momentum signal (percent change)
+                        pct = product.get("percent_change")
+                        if pct is not None and pct > 0:
+                            signals.append(RawSignalData(
+                                source=self.source_name,
+                                product_name=name,
+                                signal_type="bsr_momentum",
+                                value=pct,
+                                metadata={
+                                    "category": cat_name,
+                                    "price": product.get("price"),
+                                    "image_url": product.get("image_url"),
+                                    "rating": product.get("rating"),
+                                    "product_url": product.get("product_url"),
+                                },
+                            ))
+
+                        # Mention signal for cross-platform counting
                         signals.append(RawSignalData(
                             source=self.source_name,
                             product_name=name,
-                            signal_type="bsr_momentum",
-                            value=pct,
+                            signal_type="mention",
+                            value=1.0,
                             metadata={
                                 "category": cat_name,
                                 "price": product.get("price"),
                                 "image_url": product.get("image_url"),
-                                "rating": product.get("rating"),
                                 "product_url": product.get("product_url"),
                             },
                         ))
-
-                    # Mention signal for cross-platform counting
-                    signals.append(RawSignalData(
-                        source=self.source_name,
-                        product_name=name,
-                        signal_type="mention",
-                        value=1.0,
-                        metadata={
-                            "category": cat_name,
-                            "price": product.get("price"),
-                            "image_url": product.get("image_url"),
-                            "product_url": product.get("product_url"),
-                        },
-                    ))
 
         return signals

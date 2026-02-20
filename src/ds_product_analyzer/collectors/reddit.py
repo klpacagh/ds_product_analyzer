@@ -15,8 +15,8 @@ SUBREDDITS = [
     "shutupandtakemymoney",
     "BuyItForLife",
     "gadgets",
-    "DidntKnowIWantedThat",  # was AmazonTopRated (403)
-    "TopOfAmazon",           # was cooltools (404)
+    # "GiftIdeas",
+    "amazonfinds",
 ]
 
 

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 # Enhanced scoring weights (sum = 1.00)
 W_SEARCH_ACCEL = 0.25
 W_SOCIAL_VELOCITY = 0.18
-W_AMAZON_MOMENTUM = 0.12
+W_RETAIL_MOMENTUM = 0.12
 W_PRICE_FIT = 0.10
 W_SENTIMENT = 0.10
 W_TREND_SHAPE = 0.08
@@ -66,22 +66,67 @@ def _compute_search_accel(signals: list[RawSignal]) -> float:
 
 
 def _compute_social_velocity(signals: list[RawSignal]) -> float:
-    """TikTok + Reddit combined social velocity with creator diversity bonus."""
-    # TikTok component (60% weight)
+    """TikTok + Reddit + Etsy combined social velocity with creator diversity bonus."""
+    # TikTok component (55% weight)
     tiktok_signals = [
         s for s in signals
         if s.source == "tiktok" and s.signal_type == "tiktok_popularity"
     ]
     tiktok_raw = max((s.value for s in tiktok_signals), default=0.0)
-    tiktok_norm = min(max(tiktok_raw / 100, 0), 100)
 
-    # Reddit component (40% weight)
+    # TikTok: use individual counts when present (Playwright path), else fall back
+    plays = likes = shares = comments_t = 0.0
+    has_detailed = False
+    for s in tiktok_signals:
+        if not s.metadata_json:
+            continue
+        try:
+            meta = json.loads(s.metadata_json)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if "play_count" in meta or "like_count" in meta:
+            has_detailed = True
+            plays      = max(plays,      meta.get("play_count",    0) or 0)
+            likes      = max(likes,      meta.get("like_count",    0) or 0)
+            shares     = max(shares,     meta.get("share_count",   0) or 0)
+            comments_t = max(comments_t, meta.get("comment_count", 0) or 0)
+
+    if has_detailed:
+        views_norm  = min(plays      / 100_000, 100)
+        likes_norm  = min(likes      /  10_000, 100)
+        shares_norm = min(shares     /   1_000, 100)
+        cmt_t_norm  = min(comments_t /     500, 100)
+        tiktok_norm = (0.30 * views_norm + 0.40 * likes_norm
+                       + 0.20 * shares_norm + 0.10 * cmt_t_norm)
+    else:
+        tiktok_norm = min(max(tiktok_raw / 100, 0), 100)
+
+    # Reddit component (35% weight)
     reddit_signals = [
         s for s in signals
         if s.source == "reddit" and s.signal_type == "upvote_velocity"
     ]
     reddit_raw = max((s.value for s in reddit_signals), default=0.0)
-    reddit_norm = min(reddit_raw, 100)
+
+    # Reddit: upvote velocity (80%) + comment volume (20%)
+    _reddit_cmt_vals = []
+    for s in reddit_signals:
+        if not s.metadata_json:
+            continue
+        try:
+            _reddit_cmt_vals.append(json.loads(s.metadata_json).get("num_comments", 0) or 0)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    reddit_comments = max(_reddit_cmt_vals, default=0.0)
+    comment_norm = min(reddit_comments / 100, 100)
+    reddit_norm  = min(0.80 * min(reddit_raw, 100) + 0.20 * comment_norm, 100)
+
+    # Etsy component (10% weight): favorites count, normalised /500, cap 100
+    etsy_raw = max(
+        (s.value for s in signals if s.source == "etsy" and s.signal_type == "etsy_trending"),
+        default=0.0,
+    )
+    etsy_norm = min(etsy_raw / 500, 100)
 
     # Creator diversity bonus: count distinct authors from TikTok metadata
     authors = set()
@@ -96,7 +141,7 @@ def _compute_social_velocity(signals: list[RawSignal]) -> float:
                 pass
     diversity_bonus = min(len(authors) * 5, 15)
 
-    return min(0.6 * tiktok_norm + 0.4 * reddit_norm + diversity_bonus, 100)
+    return min(0.55 * tiktok_norm + 0.35 * reddit_norm + 0.10 * etsy_norm + diversity_bonus, 100)
 
 
 def _compute_price_fit(product: Product) -> float:
@@ -208,6 +253,30 @@ def _compute_purchase_intent(signals: list[RawSignal]) -> float:
     return min(matches / len(texts) * 100, 100)
 
 
+def _compute_retail_momentum(signals: list[RawSignal]) -> float:
+    """Retail bestseller momentum across Amazon, Walmart, and Target."""
+    # Amazon: bsr_momentum values are % change — normalise /10, cap 100
+    amazon_raw = max(
+        (s.value for s in signals if s.source == "amazon" and s.signal_type == "bsr_momentum"),
+        default=0.0,
+    )
+    amazon_norm = min(max(amazon_raw / 10, 0), 100)
+
+    # Walmart: walmart_bestseller values are already rank scores 0-100
+    walmart_norm = max(
+        (s.value for s in signals if s.source == "walmart" and s.signal_type == "walmart_bestseller"),
+        default=0.0,
+    )
+
+    # Target: target_trending values are already rank scores 0-100
+    target_norm = max(
+        (s.value for s in signals if s.source == "target" and s.signal_type == "target_trending"),
+        default=0.0,
+    )
+
+    return max(amazon_norm, walmart_norm, target_norm)
+
+
 async def score_product(session: AsyncSession, product: Product) -> TrendScore:
     """Compute an enhanced trend score for a product based on its raw signals."""
     now = datetime.now(timezone.utc)
@@ -226,10 +295,8 @@ async def score_product(session: AsyncSession, product: Product) -> TrendScore:
     search_accel = _compute_search_accel(signals)
     social_velocity = _compute_social_velocity(signals)
 
-    # Amazon BSR momentum (unchanged logic)
-    amazon_signals = [s for s in signals if s.source == "amazon" and s.signal_type == "bsr_momentum"]
-    amazon_momentum_raw = max((s.value for s in amazon_signals), default=0.0)
-    amazon_norm = min(max(amazon_momentum_raw / 10, 0), 100)
+    retail_momentum = _compute_retail_momentum(signals)
+    amazon_norm = retail_momentum  # stored in amazon_accel column for backward compat
 
     price_fit = _compute_price_fit(product)
     sentiment_score = await compute_product_sentiment(session, product)
@@ -238,7 +305,7 @@ async def score_product(session: AsyncSession, product: Product) -> TrendScore:
     # Cross-platform count
     sources = {s.source for s in signals}
     platform_count = len(sources)
-    platform_norm = min(platform_count / 4 * 100, 100)
+    platform_norm = min(platform_count / 7 * 100, 100)
 
     purchase_intent = _compute_purchase_intent(signals)
 
@@ -260,7 +327,7 @@ async def score_product(session: AsyncSession, product: Product) -> TrendScore:
     score = (
         W_SEARCH_ACCEL * search_accel
         + W_SOCIAL_VELOCITY * social_velocity
-        + W_AMAZON_MOMENTUM * amazon_norm
+        + W_RETAIL_MOMENTUM * retail_momentum
         + W_PRICE_FIT * price_fit
         + W_SENTIMENT * sentiment_score
         + W_TREND_SHAPE * trend_shape
