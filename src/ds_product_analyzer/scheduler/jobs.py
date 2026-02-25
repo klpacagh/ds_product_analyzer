@@ -14,6 +14,8 @@ from ds_product_analyzer.pipeline.runner import (
     run_etsy_collection,
     run_walmart_collection,
     run_target_collection,
+    run_shopify_collection,
+    run_aliexpress_collection,
 )
 
 logger = logging.getLogger(__name__)
@@ -88,6 +90,22 @@ def setup_scheduler():
         id="target",
         max_instances=1,
         name="Target Collection",
+    )
+    scheduler.add_job(
+        _run_async(run_shopify_collection),
+        "interval",
+        hours=settings.shopify_interval_hours,
+        id="shopify",
+        max_instances=1,
+        name="Shopify Collection",
+    )
+    scheduler.add_job(
+        _run_async(run_aliexpress_collection),
+        "interval",
+        hours=settings.aliexpress_interval_hours,
+        id="aliexpress",
+        max_instances=1,
+        name="AliExpress Collection",
     )
     scheduler.add_job(
         _run_async(run_scoring),

@@ -43,6 +43,42 @@ class Settings(BaseSettings):
     target_rate_limit_secs: float = 3.0
     target_interval_hours: int = 6
 
+    # Shopify
+    shopify_store_urls: list[str] = [
+        "https://allbirds.com",
+        "https://gymshark.com",
+        "https://kyliecosmetics.com",
+        "https://brooklinen.com",
+        "https://blendjet.com",
+        "https://beardbrand.com",
+        "https://ruggable.com",
+        "https://colourpop.com",
+        "https://jeffreestarcosmetics.com",
+        "https://fashionnova.com",
+        "https://reddressboutique.com",
+        "https://cupshe.com",
+        "https://omaze.com",
+        "https://mnml.la",
+        "https://yeezysupply.com",
+        "https://kith.com",
+        "https://fangamer.com",
+        "https://bulletproof.com",
+        "https://gfuel.com",
+        "https://pura-vidabracelets.com",
+        "https://spigen.com",
+        "https://aloyoga.com",
+        "https://sanrio.com",
+        "https://stevemadden.com"
+    ]
+    shopify_rate_limit_secs: float = 2.0
+    shopify_interval_hours: int = 6
+
+    # AliExpress
+    aliexpress_app_key: str = ""
+    aliexpress_app_secret: str = ""
+    aliexpress_rate_limit_secs: float = 2.0
+    aliexpress_interval_hours: int = 8
+
     # Sentiment
     sentiment_model: str = "distilbert-base-uncased-finetuned-sst-2-english"
 

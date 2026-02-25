@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from ds_product_analyzer.api.app import templates
 from ds_product_analyzer.db.models import Category, PriceHistory, Product, RawSignal, TrendScore
 from ds_product_analyzer.db.session import get_session
+from ds_product_analyzer.pipeline.recommender import generate_dropshipping_recommendations
 from ds_product_analyzer.pipeline.runner import run_full_pipeline
 
 logger = logging.getLogger(__name__)
@@ -400,6 +401,68 @@ async def api_product_detail(
             for ph in price_history_rows
         ],
     }
+
+
+@router.get("/recommendations", response_class=HTMLResponse)
+async def recommendations_page(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Dropshipping recommendations page."""
+    recs = await generate_dropshipping_recommendations(session, top_n=5)
+
+    last_signal = (
+        await session.execute(select(func.max(RawSignal.collected_at)))
+    ).scalar()
+
+    return templates.TemplateResponse(
+        "recommendations.html",
+        {
+            "request": request,
+            "recommendations": recs,
+            "last_updated": last_signal,
+        },
+    )
+
+
+@router.get("/api/recommendations")
+async def api_recommendations(
+    top_n: int = Query(5, ge=1, le=20),
+    session: AsyncSession = Depends(get_session),
+):
+    """JSON endpoint: dropshipping recommendations."""
+    recs = await generate_dropshipping_recommendations(session, top_n=top_n)
+
+    return [
+        {
+            "product_id": r.product.id,
+            "name": r.product.canonical_name,
+            "category": r.product.category,
+            "image_url": r.product.image_url,
+            "description": r.product.description,
+            "price_low": r.product.price_low,
+            "price_high": r.product.price_high,
+            "first_seen": r.product.first_seen.isoformat() if r.product.first_seen else None,
+            "trend_score": r.trend_score.score,
+            "ds_score": r.ds_score,
+            "verdict": r.verdict,
+            "strengths": r.strengths,
+            "risks": r.risks,
+            "strategy": r.strategy,
+            "target_channel": r.target_channel,
+            "sparkline": r.sparkline,
+            "components": {
+                "trend_shape": r.trend_score.trend_shape,
+                "price_fit": r.trend_score.price_fit,
+                "sentiment": r.trend_score.sentiment,
+                "social_velocity": r.trend_score.social_velocity,
+                "platform_count": r.trend_score.platform_count,
+                "search_accel": r.trend_score.search_accel,
+                "purchase_intent": r.trend_score.purchase_intent,
+            },
+        }
+        for r in recs
+    ]
 
 
 @router.post("/api/collect/trigger")

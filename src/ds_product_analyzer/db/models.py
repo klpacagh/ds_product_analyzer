@@ -86,6 +86,8 @@ class TrendScore(Base):
     trend_shape: Mapped[float] = mapped_column(Float, default=0.0)
     purchase_intent: Mapped[float] = mapped_column(Float, default=0.0)
     recency: Mapped[float] = mapped_column(Float, default=0.0)
+    shopify_momentum: Mapped[float] = mapped_column(Float, default=0.0)
+    aliexpress_momentum: Mapped[float] = mapped_column(Float, default=0.0)
     # Future placeholders
     ad_longevity: Mapped[float] = mapped_column(Float, default=0.0)
     review_growth: Mapped[float] = mapped_column(Float, default=0.0)

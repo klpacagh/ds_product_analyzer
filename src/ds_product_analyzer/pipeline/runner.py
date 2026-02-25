@@ -13,6 +13,8 @@ from ds_product_analyzer.collectors.tiktok import TikTokCollector
 from ds_product_analyzer.collectors.etsy import EtsyCollector
 from ds_product_analyzer.collectors.walmart import WalmartCollector
 from ds_product_analyzer.collectors.target import TargetCollector
+from ds_product_analyzer.collectors.shopify import ShopifyCollector
+from ds_product_analyzer.collectors.aliexpress import AliExpressCollector
 from ds_product_analyzer.config import settings
 from ds_product_analyzer.db.models import Category, PriceHistory, Product, RawSignal
 from ds_product_analyzer.db.session import async_session_factory
@@ -190,6 +192,42 @@ async def run_target_collection():
     return stored
 
 
+async def run_shopify_collection():
+    """Run Shopify bestseller collection."""
+    logger.info("Starting Shopify collection...")
+    keywords_by_cat = await get_all_keywords()
+    all_keywords = [kw for kws in keywords_by_cat.values() for kw in kws]
+
+    collector = ShopifyCollector()
+    signals = await collector.collect(all_keywords)
+    logger.info("Shopify collected %d signals", len(signals))
+
+    async with async_session_factory() as session:
+        stored = await store_signals(session, signals)
+        await _record_price_history(session, signals, "shopify")
+        await _enrich_source_urls(session, signals)
+    logger.info("Stored %d Shopify signals", stored)
+    return stored
+
+
+async def run_aliexpress_collection():
+    """Run AliExpress hot products collection."""
+    logger.info("Starting AliExpress collection...")
+    keywords_by_cat = await get_all_keywords()
+    all_keywords = [kw for kws in keywords_by_cat.values() for kw in kws]
+
+    collector = AliExpressCollector()
+    signals = await collector.collect(all_keywords)
+    logger.info("AliExpress collected %d signals", len(signals))
+
+    async with async_session_factory() as session:
+        stored = await store_signals(session, signals)
+        await _record_price_history(session, signals, "aliexpress")
+        await _enrich_source_urls(session, signals)
+    logger.info("Stored %d AliExpress signals", stored)
+    return stored
+
+
 async def _write_price_for_product(
     session: AsyncSession, product: Product, price_val: float, source: str
 ) -> None:
@@ -328,6 +366,8 @@ async def run_full_pipeline():
     etsy_count = 0
     walmart_count = 0
     target_count = 0
+    shopify_count = 0
+    aliexpress_count = 0
 
     try:
         google_count = await run_google_collection()
@@ -364,12 +404,22 @@ async def run_full_pipeline():
     except Exception as e:
         logger.error("Target collection failed: %s", e)
 
+    try:
+        shopify_count = await run_shopify_collection()
+    except Exception as e:
+        logger.error("Shopify collection failed: %s", e)
+
+    try:
+        aliexpress_count = await run_aliexpress_collection()
+    except Exception as e:
+        logger.error("AliExpress collection failed: %s", e)
+
     scored = await run_scoring()
     logger.info(
         "=== Pipeline complete: google=%d reddit=%d amazon=%d tiktok=%d "
-        "etsy=%d walmart=%d target=%d scored=%d ===",
+        "etsy=%d walmart=%d target=%d shopify=%d aliexpress=%d scored=%d ===",
         google_count, reddit_count, amazon_count, tiktok_count,
-        etsy_count, walmart_count, target_count, scored,
+        etsy_count, walmart_count, target_count, shopify_count, aliexpress_count, scored,
     )
     return {
         "google": google_count,
@@ -379,5 +429,7 @@ async def run_full_pipeline():
         "etsy": etsy_count,
         "walmart": walmart_count,
         "target": target_count,
+        "shopify": shopify_count,
+        "aliexpress": aliexpress_count,
         "scored": scored,
     }

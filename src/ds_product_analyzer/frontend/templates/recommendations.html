@@ -1,0 +1,239 @@
+{% extends "base.html" %}
+{% block title %}Top Dropshipping Picks — DS Product Analyzer{% endblock %}
+
+{% block content %}
+<!-- Header -->
+<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+    <div>
+        <h1 class="text-2xl font-bold">Top Dropshipping Picks</h1>
+        <p class="text-gray-400 text-sm mt-1">
+            {% if recommendations %}
+                {{ recommendations | length }} products curated by DS composite score + AI analysis
+            {% else %}
+                No recommendations available yet
+            {% endif %}
+            {% if last_updated %}
+                · Last updated {{ last_updated.strftime('%b %d, %H:%M UTC') }}
+            {% else %}
+                · No data collected yet
+            {% endif %}
+        </p>
+    </div>
+    <button onclick="triggerRefresh()"
+            id="refreshBtn"
+            class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors self-start sm:self-auto">
+        Refresh Data
+    </button>
+</div>
+
+{% if recommendations %}
+<!-- Product Cards Grid -->
+<div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+    {% for rec in recommendations %}
+    {% set p = rec.product %}
+    {% set ts = rec.trend_score %}
+
+    <!-- Verdict colors -->
+    {% if rec.verdict == 'Strong' %}
+        {% set verdict_bg = 'bg-green-900/60' %}
+        {% set verdict_text = 'text-green-300' %}
+        {% set verdict_border = 'border-green-700' %}
+    {% elif rec.verdict == 'Moderate' %}
+        {% set verdict_bg = 'bg-yellow-900/60' %}
+        {% set verdict_text = 'text-yellow-300' %}
+        {% set verdict_border = 'border-yellow-700' %}
+    {% else %}
+        {% set verdict_bg = 'bg-orange-900/60' %}
+        {% set verdict_text = 'text-orange-300' %}
+        {% set verdict_border = 'border-orange-700' %}
+    {% endif %}
+
+    <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden flex flex-col">
+
+        <!-- Card Header: image + name + badges -->
+        <div class="flex items-start gap-3 p-4 border-b border-gray-800">
+            {% if p.image_url %}
+            <img src="{{ p.image_url }}" alt="{{ p.canonical_name }}"
+                 class="w-16 h-16 object-cover rounded-lg flex-shrink-0 bg-gray-800">
+            {% else %}
+            <div class="w-16 h-16 rounded-lg bg-gray-800 flex items-center justify-center flex-shrink-0">
+                <span class="text-2xl text-gray-600">📦</span>
+            </div>
+            {% endif %}
+            <div class="min-w-0 flex-1">
+                <div class="flex items-start justify-between gap-2">
+                    <h2 class="font-semibold text-white leading-tight">
+                        <a href="/products/{{ p.id }}" class="hover:text-blue-400 transition-colors">
+                            {{ p.canonical_name }}
+                        </a>
+                    </h2>
+                    <!-- Verdict badge -->
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold {{ verdict_bg }} {{ verdict_text }} border {{ verdict_border }} flex-shrink-0">
+                        {{ rec.verdict }}
+                    </span>
+                </div>
+                <div class="flex items-center gap-2 mt-1 flex-wrap">
+                    {% if p.category %}
+                    <span class="text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded">
+                        {{ p.category | replace('-', ' ') | title }}
+                    </span>
+                    {% endif %}
+                    {% if p.price_low or p.price_high %}
+                    <span class="text-xs text-gray-400">
+                        {% if p.price_low and p.price_high %}
+                            ${{ "%.0f"|format(p.price_low) }}–${{ "%.0f"|format(p.price_high) }}
+                        {% elif p.price_high %}
+                            up to ${{ "%.0f"|format(p.price_high) }}
+                        {% else %}
+                            from ${{ "%.0f"|format(p.price_low) }}
+                        {% endif %}
+                    </span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Scores Row -->
+        <div class="grid grid-cols-2 divide-x divide-gray-800 border-b border-gray-800">
+            <div class="p-3 text-center">
+                <div class="text-xs text-gray-500 mb-1">DS Score</div>
+                <div class="text-xl font-bold
+                    {% if rec.ds_score >= 60 %}text-green-400
+                    {% elif rec.ds_score >= 40 %}text-yellow-400
+                    {% else %}text-orange-400{% endif %}">
+                    {{ "%.1f"|format(rec.ds_score) }}
+                </div>
+            </div>
+            <div class="p-3 text-center">
+                <div class="text-xs text-gray-500 mb-1">Trend Score</div>
+                <div class="text-xl font-bold
+                    {% if ts.score >= 60 %}text-blue-400
+                    {% elif ts.score >= 40 %}text-gray-300
+                    {% else %}text-gray-500{% endif %}">
+                    {{ "%.0f"|format(ts.score) }}
+                </div>
+            </div>
+        </div>
+
+        <!-- Sparkline -->
+        {% if rec.sparkline and rec.sparkline | length > 1 %}
+        <div class="px-4 pt-3 pb-1">
+            <div class="text-xs text-gray-500 mb-1">Score trend (last {{ rec.sparkline | length }} pts)</div>
+            <canvas id="sparkline-{{ p.id }}" height="40" class="w-full"></canvas>
+        </div>
+        {% endif %}
+
+        <!-- Strengths -->
+        <div class="px-4 py-3 flex-1">
+            <div class="text-xs font-semibold text-green-400 uppercase tracking-wider mb-2">Strengths</div>
+            <ul class="space-y-1">
+                {% for s in rec.strengths %}
+                <li class="text-sm text-gray-300 flex items-start gap-2">
+                    <span class="text-green-500 flex-shrink-0 mt-0.5">✓</span>
+                    <span>{{ s }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+
+            <!-- Risks (collapsible on mobile) -->
+            <details class="mt-3">
+                <summary class="text-xs font-semibold text-red-400 uppercase tracking-wider cursor-pointer select-none">
+                    Risks ({{ rec.risks | length }})
+                </summary>
+                <ul class="mt-2 space-y-1">
+                    {% for r in rec.risks %}
+                    <li class="text-sm text-gray-400 flex items-start gap-2">
+                        <span class="text-red-500 flex-shrink-0 mt-0.5">⚠</span>
+                        <span>{{ r }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </details>
+        </div>
+
+        <!-- Strategy + Channel -->
+        <div class="px-4 py-3 bg-gray-800/40 border-t border-gray-800">
+            {% if rec.strategy %}
+            <p class="text-sm text-gray-300 mb-2">{{ rec.strategy }}</p>
+            {% endif %}
+            {% if rec.target_channel %}
+            <div class="flex items-center gap-2">
+                <span class="text-xs text-gray-500">Target channel:</span>
+                <span class="text-xs font-medium text-blue-400">{{ rec.target_channel }}</span>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Footer: link -->
+        <div class="px-4 py-2 border-t border-gray-800 flex justify-between items-center">
+            <span class="text-xs text-gray-600">
+                {% if p.first_seen %}First seen {{ p.first_seen.strftime('%b %d, %Y') }}{% endif %}
+            </span>
+            <a href="/products/{{ p.id }}"
+               class="text-xs text-blue-400 hover:text-blue-300 transition-colors">
+                View details →
+            </a>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% else %}
+<!-- Empty state -->
+<div class="flex flex-col items-center justify-center py-24 text-center">
+    <div class="text-5xl mb-4">📊</div>
+    <h2 class="text-xl font-semibold text-gray-300 mb-2">No data collected yet</h2>
+    <p class="text-gray-500 mb-6 max-w-sm">
+        Run a data collection cycle first to generate product recommendations.
+    </p>
+    <button onclick="triggerRefresh()"
+            class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-medium transition-colors">
+        Collect Data Now
+    </button>
+</div>
+{% endif %}
+
+<script>
+// Sparklines via Chart.js
+{% for rec in recommendations %}
+{% if rec.sparkline and rec.sparkline | length > 1 %}
+(function() {
+    var ctx = document.getElementById('sparkline-{{ rec.product.id }}');
+    if (!ctx) return;
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: {{ rec.sparkline | map('string') | list | tojson }}.map((_, i) => i + 1),
+            datasets: [{
+                data: {{ rec.sparkline | tojson }},
+                borderColor: '{% if rec.verdict == "Strong" %}#4ade80{% elif rec.verdict == "Moderate" %}#facc15{% else %}#fb923c{% endif %}',
+                backgroundColor: 'transparent',
+                borderWidth: 2,
+                pointRadius: 0,
+                tension: 0.3,
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false }, tooltip: { enabled: false } },
+            scales: { x: { display: false }, y: { display: false } },
+            animation: false,
+        }
+    });
+})();
+{% endif %}
+{% endfor %}
+
+// Refresh button
+function triggerRefresh() {
+    var btn = document.getElementById('refreshBtn');
+    if (btn) { btn.textContent = 'Collecting…'; btn.disabled = true; }
+    fetch('/api/collect/trigger', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function() { window.location.reload(); })
+        .catch(function() {
+            if (btn) { btn.textContent = 'Error — try again'; btn.disabled = false; }
+        });
+}
+</script>
+{% endblock %}

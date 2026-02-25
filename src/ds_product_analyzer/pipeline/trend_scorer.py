@@ -15,7 +15,9 @@ logger = logging.getLogger(__name__)
 # Enhanced scoring weights (sum = 1.00)
 W_SEARCH_ACCEL = 0.25
 W_SOCIAL_VELOCITY = 0.18
-W_RETAIL_MOMENTUM = 0.12
+W_RETAIL_MOMENTUM = 0.04   # was 0.07 — Amazon/Walmart/Target only
+W_SHOPIFY_MOMENTUM = 0.05  # Shopify D2C bestsellers
+W_ALIEXPRESS_MOMENTUM = 0.03  # AliExpress hot products
 W_PRICE_FIT = 0.10
 W_SENTIMENT = 0.10
 W_TREND_SHAPE = 0.08
@@ -277,6 +279,26 @@ def _compute_retail_momentum(signals: list[RawSignal]) -> float:
     return max(amazon_norm, walmart_norm, target_norm)
 
 
+def _compute_shopify_momentum(signals: list[RawSignal]) -> float:
+    """Shopify D2C bestseller rank score (0-100) across all configured stores."""
+    vals = [
+        s.value
+        for s in signals
+        if s.source == "shopify" and s.signal_type == "shopify_bestseller"
+    ]
+    return max(vals, default=0.0)
+
+
+def _compute_aliexpress_momentum(signals: list[RawSignal]) -> float:
+    """AliExpress hot product score (0-100) based on order volume."""
+    vals = [
+        s.value
+        for s in signals
+        if s.source == "aliexpress" and s.signal_type == "aliexpress_hot_product"
+    ]
+    return max(vals, default=0.0)
+
+
 async def score_product(session: AsyncSession, product: Product) -> TrendScore:
     """Compute an enhanced trend score for a product based on its raw signals."""
     now = datetime.now(timezone.utc)
@@ -297,6 +319,8 @@ async def score_product(session: AsyncSession, product: Product) -> TrendScore:
 
     retail_momentum = _compute_retail_momentum(signals)
     amazon_norm = retail_momentum  # stored in amazon_accel column for backward compat
+    shopify_momentum = _compute_shopify_momentum(signals)
+    aliexpress_momentum = _compute_aliexpress_momentum(signals)
 
     price_fit = _compute_price_fit(product)
     sentiment_score = await compute_product_sentiment(session, product)
@@ -328,6 +352,8 @@ async def score_product(session: AsyncSession, product: Product) -> TrendScore:
         W_SEARCH_ACCEL * search_accel
         + W_SOCIAL_VELOCITY * social_velocity
         + W_RETAIL_MOMENTUM * retail_momentum
+        + W_SHOPIFY_MOMENTUM * shopify_momentum
+        + W_ALIEXPRESS_MOMENTUM * aliexpress_momentum
         + W_PRICE_FIT * price_fit
         + W_SENTIMENT * sentiment_score
         + W_TREND_SHAPE * trend_shape
@@ -354,6 +380,8 @@ async def score_product(session: AsyncSession, product: Product) -> TrendScore:
         trend_shape=round(trend_shape, 2),
         purchase_intent=round(purchase_intent, 2),
         recency=round(recency_norm, 2),
+        shopify_momentum=round(shopify_momentum, 2),
+        aliexpress_momentum=round(aliexpress_momentum, 2),
     )
     session.add(trend)
     return trend
