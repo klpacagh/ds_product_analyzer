@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from collections import defaultdict
 from datetime import datetime, timezone
 
@@ -10,10 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ds_product_analyzer.api.app import templates
+from ds_product_analyzer.collectors.amazon import _extract_asin
 from ds_product_analyzer.db.models import Category, PriceHistory, Product, RawSignal, TrendScore
 from ds_product_analyzer.db.session import get_session
 from ds_product_analyzer.pipeline.recommender import generate_dropshipping_recommendations
 from ds_product_analyzer.pipeline.runner import run_full_pipeline
+from ds_product_analyzer.utils.bsr_sales import estimate_monthly_revenue, estimate_monthly_sales
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +259,153 @@ async def product_detail(
             "price_chart_values": json.dumps(price_chart_values),
         },
     )
+
+
+@router.get("/amazon", response_class=HTMLResponse)
+async def amazon_page(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Amazon-specific product view with BSR, ASIN, and sales estimates."""
+    products = await _build_amazon_products(session)
+
+    with_bsr = sum(1 for p in products if p["bsr_rank"] is not None)
+    with_sales = sum(1 for p in products if p["est_sales"] is not None)
+    total_rev = sum(p["est_revenue"] or 0 for p in products)
+
+    last_signal = (
+        await session.execute(select(func.max(RawSignal.collected_at)))
+    ).scalar()
+
+    return templates.TemplateResponse(
+        "amazon.html",
+        {
+            "request": request,
+            "products": products,
+            "total_products": len(products),
+            "with_bsr": with_bsr,
+            "with_sales": with_sales,
+            "total_est_revenue": round(total_rev, 2),
+            "last_updated": last_signal,
+        },
+    )
+
+
+@router.get("/api/amazon")
+async def api_amazon(session: AsyncSession = Depends(get_session)):
+    """JSON endpoint: Amazon products with BSR and sales estimates."""
+    return await _build_amazon_products(session)
+
+
+async def _build_amazon_products(session: AsyncSession) -> list[dict]:
+    """Shared query logic for Amazon view."""
+    latest_signal_sq = (
+        select(RawSignal.product_id, func.max(RawSignal.id).label("max_signal_id"))
+        .where(
+            RawSignal.source == "amazon",
+            RawSignal.signal_type == "bsr_momentum",
+            RawSignal.product_id.is_not(None),
+        )
+        .group_by(RawSignal.product_id)
+        .subquery()
+    )
+    stmt = (
+        select(Product, RawSignal)
+        .join(latest_signal_sq, Product.id == latest_signal_sq.c.product_id)
+        .join(RawSignal, RawSignal.id == latest_signal_sq.c.max_signal_id)
+        .order_by(desc(RawSignal.value))
+        .limit(500)
+    )
+    results = (await session.execute(stmt)).all()
+
+    product_ids = [p.id for p, sig in results]
+
+    # Fetch last 7 bsr_momentum signals per product for sparklines
+    sparkline_map: dict[int, list[dict]] = defaultdict(list)
+    if product_ids:
+        spark_rows = (await session.execute(
+            select(RawSignal.product_id, RawSignal.value, RawSignal.metadata_json, RawSignal.id)
+            .where(
+                RawSignal.product_id.in_(product_ids),
+                RawSignal.source == "amazon",
+                RawSignal.signal_type == "bsr_momentum",
+            )
+            .order_by(RawSignal.product_id, desc(RawSignal.id))
+        )).all()
+        for pid, val, meta_json, sig_id in spark_rows:
+            if len(sparkline_map[pid]) < 7:
+                sparkline_map[pid].append({"meta_json": meta_json})
+        # Reverse to chronological order
+        sparkline_map = {pid: list(reversed(rows)) for pid, rows in sparkline_map.items()}
+
+    products = []
+    for p, sig in results:
+        try:
+            meta = json.loads(sig.metadata_json) if sig.metadata_json else {}
+        except (json.JSONDecodeError, TypeError):
+            meta = {}
+
+        category = meta.get("category") or p.category or ""
+        asin = meta.get("asin") or _extract_asin(meta.get("product_url") or p.source_url)
+        rating = meta.get("rating")
+        rating_value = None
+        if rating:
+            m = re.search(r"[\d.]+", rating)
+            if m:
+                try:
+                    rating_value = float(m.group())
+                except ValueError:
+                    pass
+
+        price_raw = meta.get("price") or p.price_high or p.price_low
+        try:
+            price = float(price_raw) if price_raw is not None else None
+        except (TypeError, ValueError):
+            price = None
+
+        # Prefer actual BSR from detail page enrichment; fall back to None (show —)
+        bsr_rank_display = p.amazon_bsr_rank  # shown in BSR column; None → "—"
+        bsr_rank_for_est = p.amazon_bsr_rank  # used for sales/revenue estimates
+
+        est_sales = None
+        est_revenue = None
+        if bsr_rank_for_est and isinstance(bsr_rank_for_est, int):
+            est_sales = estimate_monthly_sales(bsr_rank_for_est, category)
+            if price:
+                est_revenue = round(est_sales * price, 2)
+
+        # Build sparkline from historical bsr_momentum signals (M&S list position — still valid momentum signal)
+        spark_sales: list[int] = []
+        for row in sparkline_map.get(p.id, []):
+            try:
+                smeta = json.loads(row["meta_json"]) if row["meta_json"] else {}
+            except (json.JSONDecodeError, TypeError):
+                smeta = {}
+            spark_bsr = smeta.get("bsr_rank")
+            spark_cat = smeta.get("category") or category
+            if spark_bsr and isinstance(spark_bsr, int):
+                spark_sales.append(estimate_monthly_sales(spark_bsr, spark_cat))
+
+        products.append({
+            "id": p.id,
+            "name": p.canonical_name,
+            "category": category,
+            "image_url": p.image_url or meta.get("image_url"),
+            "product_url": meta.get("product_url") or p.source_url,
+            "asin": asin,
+            "bsr_rank": bsr_rank_display,
+            "bsr_momentum_pct": sig.value,
+            "rating": rating,
+            "rating_value": rating_value,
+            "review_count": meta.get("review_count"),
+            "brand": meta.get("brand"),
+            "price": price,
+            "est_sales": est_sales,
+            "est_revenue": est_revenue,
+            "sparkline": spark_sales,
+        })
+
+    return products
 
 
 # --- JSON API Routes ---

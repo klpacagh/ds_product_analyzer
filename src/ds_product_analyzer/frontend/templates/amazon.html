@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+{% block title %}Amazon Products — DS Product Analyzer{% endblock %}
+
+{% block content %}
+<div class="mb-6 flex items-center justify-between flex-wrap gap-4">
+    <div>
+        <h1 class="text-2xl font-bold text-white">Amazon Products</h1>
+        <p class="text-sm text-gray-400 mt-1">
+            Amazon Movers &amp; Shakers — BSR momentum, estimated sales &amp; revenue
+            {% if last_updated %}· Last updated {{ last_updated.strftime('%b %d %H:%M') }}{% endif %}
+        </p>
+    </div>
+    <a href="/" class="text-sm text-indigo-400 hover:text-indigo-300">← Dashboard</a>
+</div>
+
+{# Stats summary bar #}
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+    <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+        <div class="text-xs text-gray-500 uppercase tracking-wide mb-1">Products Tracked</div>
+        <div class="text-2xl font-bold text-white">{{ total_products }}</div>
+    </div>
+    <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+        <div class="text-xs text-gray-500 uppercase tracking-wide mb-1">With BSR Data</div>
+        <div class="text-2xl font-bold text-blue-400">{{ with_bsr }}</div>
+    </div>
+    <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+        <div class="text-xs text-gray-500 uppercase tracking-wide mb-1">With Sales Est.</div>
+        <div class="text-2xl font-bold text-green-400">{{ with_sales }}</div>
+    </div>
+    <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+        <div class="text-xs text-gray-500 uppercase tracking-wide mb-1">Total Est. Rev/mo</div>
+        <div class="text-2xl font-bold text-purple-400">
+            {% if total_est_revenue >= 1000000 %}
+                ${{ '%.1f' | format(total_est_revenue / 1000000) }}M
+            {% elif total_est_revenue >= 1000 %}
+                ${{ '%.0f' | format(total_est_revenue / 1000) }}K
+            {% else %}
+                ${{ '%.0f' | format(total_est_revenue) }}
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{% if not products %}
+<div class="text-center py-20 text-gray-500">
+    <div class="text-5xl mb-4">📦</div>
+    <p class="text-lg mb-2">No Amazon products collected yet.</p>
+    <p class="text-sm mb-6">Run the collector first to populate this view.</p>
+    <a href="/" class="inline-block bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-5 py-2 rounded-lg">
+        Go to Dashboard &amp; Collect
+    </a>
+</div>
+{% else %}
+
+<div class="overflow-x-auto rounded-lg border border-gray-800">
+    <table class="table-fixed w-full text-sm text-left">
+        <colgroup>
+            <col style="width:1.75rem">  {# # #}
+            <col>                         {# Product — gets remaining ~33rem #}
+            <col style="width:6rem">      {# ASIN #}
+            <col style="width:3.5rem">    {# Price #}
+            <col style="width:4.5rem">    {# Est. Sales #}
+            <col style="width:4.5rem">    {# Est. Rev/mo #}
+            <col style="width:3.5rem">    {# Trend #}
+            <col style="width:4rem">      {# BSR #}
+            <col style="width:4.5rem">    {# Momentum #}
+            <col style="width:3.5rem">    {# Rating #}
+            <col style="width:4rem">      {# Reviews #}
+            <col style="width:5rem">      {# Category #}
+        </colgroup>
+        <thead class="bg-gray-900 text-xs text-gray-500 uppercase tracking-wide">
+            <tr>
+                <th class="px-1 py-2 text-center">#</th>
+                <th class="px-1 py-2">Product</th>
+                <th class="px-1 py-2 text-center">ASIN</th>
+                <th class="px-1 py-2 text-right">Price</th>
+                <th class="px-1 py-2 text-right">Est. Sales</th>
+                <th class="px-1 py-2 text-right">Est. Rev/mo</th>
+                <th class="px-1 py-2 text-center">Trend</th>
+                <th class="px-1 py-2 text-right">BSR</th>
+                <th class="px-1 py-2 text-right">Momentum</th>
+                <th class="px-1 py-2 text-center">Rating</th>
+                <th class="px-1 py-2 text-right">Reviews</th>
+                <th class="px-1 py-2 text-left">Category</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-800">
+            {% for p in products %}
+            <tr class="hover:bg-gray-900/50 transition-colors">
+                {# # #}
+                <td class="px-1 py-2 text-center text-gray-600 text-xs whitespace-nowrap">{{ loop.index }}</td>
+
+                {# Product (name + link) #}
+                <td class="px-1 py-2">
+                    {% if p.product_url %}
+                    <a href="{{ p.product_url }}" target="_blank" rel="noopener"
+                       class="text-gray-200 hover:text-white font-medium text-xs leading-snug line-clamp-2">
+                        {{ p.name }}
+                    </a>
+                    {% else %}
+                    <span class="text-gray-200 font-medium text-xs leading-snug line-clamp-2">{{ p.name }}</span>
+                    {% endif %}
+                </td>
+
+                {# ASIN #}
+                <td class="px-1 py-2 text-center whitespace-nowrap">
+                    {% if p.asin %}
+                    <a href="https://www.amazon.com/dp/{{ p.asin }}" target="_blank" rel="noopener"
+                       class="font-mono text-xs text-indigo-400 hover:text-indigo-300">{{ p.asin }}</a>
+                    {% else %}
+                    <span class="text-gray-600">—</span>
+                    {% endif %}
+                </td>
+
+                {# Price #}
+                <td class="px-1 py-2 text-right text-gray-300 text-xs whitespace-nowrap">
+                    {% if p.price %}${{ '%.2f' | format(p.price) }}{% else %}—{% endif %}
+                </td>
+
+                {# Est. Sales #}
+                <td class="px-1 py-2 text-right text-xs font-mono whitespace-nowrap">
+                    {% if p.est_sales is not none %}
+                        {% if p.est_sales >= 5000 %}
+                        <span class="text-green-400">{{ '{:,}'.format(p.est_sales) }}</span>
+                        {% elif p.est_sales >= 1000 %}
+                        <span class="text-blue-400">{{ '{:,}'.format(p.est_sales) }}</span>
+                        {% else %}
+                        <span class="text-gray-400">{{ '{:,}'.format(p.est_sales) }}</span>
+                        {% endif %}
+                    {% else %}
+                    <span class="text-gray-600">—</span>
+                    {% endif %}
+                </td>
+
+                {# Est. Rev/mo #}
+                <td class="px-1 py-2 text-right text-xs font-mono whitespace-nowrap">
+                    {% if p.est_revenue is not none %}
+                        {% if p.est_revenue >= 100000 %}
+                        <span class="text-purple-400">${{ '%.0f' | format(p.est_revenue / 1000) }}K</span>
+                        {% elif p.est_revenue >= 20000 %}
+                        <span class="text-green-400">${{ '%.0f' | format(p.est_revenue / 1000) }}K</span>
+                        {% elif p.est_revenue >= 5000 %}
+                        <span class="text-blue-400">${{ '%.0f' | format(p.est_revenue / 1000) }}K</span>
+                        {% else %}
+                        <span class="text-gray-400">${{ '%.0f' | format(p.est_revenue) }}</span>
+                        {% endif %}
+                    {% else %}
+                    <span class="text-gray-600">—</span>
+                    {% endif %}
+                </td>
+
+                {# Sales Trend sparkline #}
+                <td class="px-1 py-2 text-center whitespace-nowrap">
+                    {% if p.sparkline | length >= 2 %}
+                        {% set scores = p.sparkline %}
+                        {% set min_s = scores | min %}
+                        {% set max_s = scores | max %}
+                        {% set range_s = max_s - min_s if max_s != min_s else 1 %}
+                        {% set line_color = '#22c55e' if scores[-1] > scores[0] else '#ef4444' if scores[-1] < scores[0] else '#6b7280' %}
+                        <svg width="48" height="20" viewBox="0 0 {{ (scores | length - 1) * 10 }} 20" class="inline-block">
+                            <polyline
+                                fill="none"
+                                stroke="{{ line_color }}"
+                                stroke-width="1.5"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                points="{% for s in scores %}{{ loop.index0 * 10 }},{{ 18 - ((s - min_s) / range_s * 16) + 1 }}{% if not loop.last %} {% endif %}{% endfor %}"
+                            />
+                        </svg>
+                    {% else %}
+                    <span class="text-gray-600">—</span>
+                    {% endif %}
+                </td>
+
+                {# BSR Rank #}
+                <td class="px-1 py-2 text-right text-xs font-mono whitespace-nowrap">
+                    {% if p.bsr_rank is not none %}
+                        {% if p.bsr_rank <= 100 %}
+                        <span class="text-green-400">#{{ '{:,}'.format(p.bsr_rank) }}</span>
+                        {% elif p.bsr_rank <= 1000 %}
+                        <span class="text-blue-400">#{{ '{:,}'.format(p.bsr_rank) }}</span>
+                        {% else %}
+                        <span class="text-gray-400">#{{ '{:,}'.format(p.bsr_rank) }}</span>
+                        {% endif %}
+                    {% else %}
+                    <span class="text-gray-600">—</span>
+                    {% endif %}
+                </td>
+
+                {# BSR Momentum % #}
+                <td class="px-1 py-2 text-right text-xs font-mono whitespace-nowrap">
+                    {% if p.bsr_momentum_pct is not none %}
+                        {% if p.bsr_momentum_pct >= 500 %}
+                        <span class="text-green-400">+{{ '%.0f' | format(p.bsr_momentum_pct) }}%</span>
+                        {% elif p.bsr_momentum_pct >= 100 %}
+                        <span class="text-yellow-400">+{{ '%.0f' | format(p.bsr_momentum_pct) }}%</span>
+                        {% else %}
+                        <span class="text-gray-400">+{{ '%.0f' | format(p.bsr_momentum_pct) }}%</span>
+                        {% endif %}
+                    {% else %}
+                    <span class="text-gray-600">—</span>
+                    {% endif %}
+                </td>
+
+                {# Rating #}
+                <td class="px-1 py-2 text-center text-xs whitespace-nowrap">
+                    {% if p.rating_value is not none %}
+                    <span class="text-yellow-400">{{ '%.1f' | format(p.rating_value) }}★</span>
+                    {% else %}
+                    <span class="text-gray-600">—</span>
+                    {% endif %}
+                </td>
+
+                {# Reviews #}
+                <td class="px-1 py-2 text-right text-xs text-gray-400 font-mono whitespace-nowrap">
+                    {% if p.review_count is not none %}
+                        {{ '{:,}'.format(p.review_count) }}
+                    {% else %}
+                    <span class="text-gray-600">—</span>
+                    {% endif %}
+                </td>
+
+                {# Category #}
+                <td class="px-1 py-2 text-left text-xs text-gray-500 whitespace-nowrap">
+                    {{ p.category or '—' }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<p class="text-xs text-gray-600 mt-4">
+    * Estimated sales and revenue are BSR-derived approximations using Jungle Scout methodology.
+    Actual figures may differ significantly. Use for trend analysis only.
+</p>
+{% endif %}
+{% endblock %}

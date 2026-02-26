@@ -32,6 +32,8 @@ class Product(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     price_low: Mapped[float | None] = mapped_column(Float, nullable=True)
     price_high: Mapped[float | None] = mapped_column(Float, nullable=True)
+    amazon_bsr_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    amazon_bsr_category: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     category_rel: Mapped[Category | None] = relationship(back_populates="products")
     aliases: Mapped[list["ProductAlias"]] = relationship(back_populates="product")

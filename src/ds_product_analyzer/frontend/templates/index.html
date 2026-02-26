@@ -53,41 +53,57 @@
         Confirmed Products ({{ confirmed | length }})
     </summary>
     {% if confirmed %}
-    <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+    <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto">
         <table class="w-full text-sm table-fixed">
+            <colgroup>
+                <col style="width:1.75rem">  {# # #}
+                <col>                         {# Product — gets remaining ~40rem #}
+                <col style="width:5rem">      {# Category #}
+                <col style="width:4rem">      {# Price #}
+                <col style="width:3.25rem">   {# Score #}
+                <col style="width:3.5rem">    {# Trend #}
+                <col style="width:2.75rem">   {# Srch #}
+                <col style="width:3rem">      {# Social #}
+                <col style="width:2.75rem">   {# Amzn #}
+                <col style="width:3rem">      {# P.Fit #}
+                <col style="width:2.75rem">   {# Sent #}
+                <col style="width:3.25rem">   {# Intent #}
+                <col style="width:2.25rem">   {# Src #}
+                <col style="width:3rem">      {# Seen #}
+            </colgroup>
             <thead>
                 <tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wider">
-                    <th class="w-8  px-2 py-3 text-left">#</th>
-                    <th class="      px-2 py-3 text-left">Product</th>
-                    <th class="w-24 px-2 py-3 text-left">Category</th>
-                    <th class="w-16 px-2 py-3 text-center">Price</th>
-                    <th class="w-14 px-2 py-3 text-center">Score</th>
-                    <th class="w-16 px-2 py-3 text-center">Trend</th>
-                    <th class="w-12 px-2 py-3 text-center" title="Search acceleration">Srch</th>
-                    <th class="w-12 px-2 py-3 text-center">Social</th>
-                    <th class="w-12 px-2 py-3 text-center" title="Amazon BSR acceleration">Amzn</th>
-                    <th class="w-14 px-2 py-3 text-center" title="Price fit score">P.Fit</th>
-                    <th class="w-12 px-2 py-3 text-center" title="Sentiment score">Sent</th>
-                    <th class="w-12 px-2 py-3 text-center" title="Purchase intent">Intent</th>
-                    <th class="w-10 px-2 py-3 text-center" title="Platform source count">Src</th>
-                    <th class="w-14 px-2 py-3 text-right" title="First seen date">Seen</th>
+                    <th class="px-1 py-2 text-left">#</th>
+                    <th class="px-1 py-2 text-left">Product</th>
+                    <th class="px-1 py-2 text-left">Category</th>
+                    <th class="px-1 py-2 text-center">Price</th>
+                    <th class="px-1 py-2 text-center">Score</th>
+                    <th class="px-1 py-2 text-center">Trend</th>
+                    <th class="px-1 py-2 text-center" title="Search acceleration">Srch</th>
+                    <th class="px-1 py-2 text-center">Social</th>
+                    <th class="px-1 py-2 text-center" title="Amazon BSR acceleration">Amzn</th>
+                    <th class="px-1 py-2 text-center" title="Price fit score">P.Fit</th>
+                    <th class="px-1 py-2 text-center" title="Sentiment score">Sent</th>
+                    <th class="px-1 py-2 text-center" title="Purchase intent">Intent</th>
+                    <th class="px-1 py-2 text-center" title="Platform source count">Src</th>
+                    <th class="px-1 py-2 text-right" title="First seen date">Seen</th>
                 </tr>
             </thead>
             <tbody>
                 {% for p in confirmed %}
                 <tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
-                    <td class="px-2 py-3 text-gray-500 font-mono">{{ loop.index }}</td>
-                    <td class="px-2 py-3 min-w-0">
-                        <a href="/products/{{ p.id }}" class="text-blue-400 hover:text-blue-300 font-medium line-clamp-2">
+                    <td class="px-1 py-2 text-gray-500 font-mono text-xs">{{ loop.index }}</td>
+                    <td class="px-1 py-2">
+                        <a href="/products/{{ p.id }}" class="text-blue-400 hover:text-blue-300 font-medium block truncate">
                             {{ p.name | title }}
                         </a>
                     </td>
-                    <td class="px-2 py-3">
-                        <span class="text-gray-400 text-xs bg-gray-800 px-1.5 py-0.5 rounded block truncate">
+                    <td class="px-1 py-2">
+                        <span class="text-gray-400 text-xs bg-gray-800 px-1 py-0.5 rounded block truncate">
                             {{ p.category | replace('-', ' ') | title }}
                         </span>
                     </td>
-                    <td class="px-2 py-3 text-center text-gray-300 text-xs">
+                    <td class="px-1 py-2 text-center text-gray-300 text-xs">
                         {% if p.price_low and p.price_high %}
                             ${{ '%.0f' | format(p.price_low) }}–${{ '%.0f' | format(p.price_high) }}
                         {% elif p.price_low %}
@@ -98,14 +114,14 @@
                             —
                         {% endif %}
                     </td>
-                    <td class="px-2 py-3 text-center">
+                    <td class="px-1 py-2 text-center whitespace-nowrap">
                         {% set color = 'bg-red-500/20 text-red-400' if p.score >= 70
                                        else 'bg-yellow-500/20 text-yellow-400' if p.score >= 40
                                        else 'bg-green-500/20 text-green-400' if p.score >= 15
                                        else 'bg-gray-700/50 text-gray-400' %}
                         <span class="score-badge {{ color }}">{{ '%.1f' | format(p.score) }}</span>
                     </td>
-                    <td class="px-2 py-3 text-center">
+                    <td class="px-1 py-2 text-center whitespace-nowrap">
                         {% if p.sparkline | length >= 2 %}
                             {% set scores = p.sparkline %}
                             {% set min_s = scores | min %}
@@ -126,22 +142,22 @@
                             <span class="text-gray-600">—</span>
                         {% endif %}
                     </td>
-                    <td class="px-2 py-3 text-center text-gray-300">{{ '%.1f' | format(p.search_accel) }}</td>
-                    <td class="px-2 py-3 text-center text-gray-300">{{ '%.1f' | format(p.social_velocity) }}</td>
-                    <td class="px-2 py-3 text-center text-gray-300">{{ '%.1f' | format(p.amazon_accel) }}</td>
-                    <td class="px-2 py-3 text-center text-gray-300">{{ '%.1f' | format(p.price_fit) }}</td>
-                    <td class="px-2 py-3 text-center">
+                    <td class="px-1 py-2 text-center text-gray-300 whitespace-nowrap">{{ '%.1f' | format(p.search_accel) }}</td>
+                    <td class="px-1 py-2 text-center text-gray-300 whitespace-nowrap">{{ '%.1f' | format(p.social_velocity) }}</td>
+                    <td class="px-1 py-2 text-center text-gray-300 whitespace-nowrap">{{ '%.1f' | format(p.amazon_accel) }}</td>
+                    <td class="px-1 py-2 text-center text-gray-300 whitespace-nowrap">{{ '%.1f' | format(p.price_fit) }}</td>
+                    <td class="px-1 py-2 text-center whitespace-nowrap">
                         {% set s_val = p.sentiment %}
                         {% set s_color = 'text-green-400' if s_val >= 60
                                          else 'text-red-400' if s_val <= 40
                                          else 'text-gray-400' %}
                         <span class="{{ s_color }}">{{ '%.0f' | format(s_val) }}</span>
                     </td>
-                    <td class="px-2 py-3 text-center text-gray-300">{{ '%.1f' | format(p.purchase_intent) }}</td>
-                    <td class="px-2 py-3 text-center">
+                    <td class="px-1 py-2 text-center text-gray-300 whitespace-nowrap">{{ '%.1f' | format(p.purchase_intent) }}</td>
+                    <td class="px-1 py-2 text-center whitespace-nowrap">
                         <span class="font-mono text-gray-300">{{ p.platform_count }}</span>
                     </td>
-                    <td class="px-2 py-3 text-right text-gray-500 text-xs">
+                    <td class="px-1 py-2 text-right text-gray-500 text-xs whitespace-nowrap">
                         {% if p.first_seen %}{{ p.first_seen.strftime('%b %d') }}{% endif %}
                     </td>
                 </tr>
@@ -160,35 +176,50 @@
         Social Signals ({{ social | length }})
     </summary>
     {% if social %}
-    <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden mt-2">
+    <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto mt-2">
         <table class="w-full text-sm table-fixed">
+            <colgroup>
+                <col style="width:1.75rem">  {# # #}
+                <col>                         {# Product — gets remaining #}
+                <col style="width:6rem">      {# Platform #}
+                <col style="width:3.25rem">   {# Score #}
+                <col style="width:3.5rem">    {# Trend #}
+                <col style="width:2.75rem">   {# Srch #}
+                <col style="width:3rem">      {# Social #}
+                <col style="width:2.75rem">   {# Amzn #}
+                <col style="width:3rem">      {# P.Fit #}
+                <col style="width:2.75rem">   {# Sent #}
+                <col style="width:3.25rem">   {# Intent #}
+                <col style="width:2.25rem">   {# Src #}
+                <col style="width:3rem">      {# Seen #}
+            </colgroup>
             <thead>
                 <tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wider">
-                    <th class="w-8  px-2 py-3 text-left">#</th>
-                    <th class="      px-2 py-3 text-left">Product</th>
-                    <th class="w-24 px-2 py-3 text-left">Platform</th>
-                    <th class="w-14 px-2 py-3 text-center">Score</th>
-                    <th class="w-16 px-2 py-3 text-center">Trend</th>
-                    <th class="w-12 px-2 py-3 text-center" title="Search acceleration">Srch</th>
-                    <th class="w-12 px-2 py-3 text-center">Social</th>
-                    <th class="w-12 px-2 py-3 text-center" title="Amazon BSR acceleration">Amzn</th>
-                    <th class="w-14 px-2 py-3 text-center" title="Price fit score">P.Fit</th>
-                    <th class="w-12 px-2 py-3 text-center" title="Sentiment score">Sent</th>
-                    <th class="w-12 px-2 py-3 text-center" title="Purchase intent">Intent</th>
-                    <th class="w-10 px-2 py-3 text-center" title="Platform source count">Src</th>
-                    <th class="w-14 px-2 py-3 text-right" title="First seen date">Seen</th>
+                    <th class="px-1 py-2 text-left">#</th>
+                    <th class="px-1 py-2 text-left">Product</th>
+                    <th class="px-1 py-2 text-left">Platform</th>
+                    <th class="px-1 py-2 text-center">Score</th>
+                    <th class="px-1 py-2 text-center">Trend</th>
+                    <th class="px-1 py-2 text-center" title="Search acceleration">Srch</th>
+                    <th class="px-1 py-2 text-center">Social</th>
+                    <th class="px-1 py-2 text-center" title="Amazon BSR acceleration">Amzn</th>
+                    <th class="px-1 py-2 text-center" title="Price fit score">P.Fit</th>
+                    <th class="px-1 py-2 text-center" title="Sentiment score">Sent</th>
+                    <th class="px-1 py-2 text-center" title="Purchase intent">Intent</th>
+                    <th class="px-1 py-2 text-center" title="Platform source count">Src</th>
+                    <th class="px-1 py-2 text-right" title="First seen date">Seen</th>
                 </tr>
             </thead>
             <tbody>
                 {% for p in social %}
                 <tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
-                    <td class="px-2 py-3 text-gray-500 font-mono">{{ loop.index }}</td>
-                    <td class="px-2 py-3 min-w-0">
-                        <a href="/products/{{ p.id }}" class="text-blue-400 hover:text-blue-300 font-medium line-clamp-2">
+                    <td class="px-1 py-2 text-gray-500 font-mono text-xs">{{ loop.index }}</td>
+                    <td class="px-1 py-2">
+                        <a href="/products/{{ p.id }}" class="text-blue-400 hover:text-blue-300 font-medium block truncate">
                             {{ p.name | title }}
                         </a>
                     </td>
-                    <td class="px-2 py-3">
+                    <td class="px-1 py-2">
                         {% if p.sources %}
                         <div class="flex flex-wrap gap-1">
                             {% for src in p.sources[:2] %}
@@ -209,14 +240,14 @@
                         </span>
                         {% endif %}
                     </td>
-                    <td class="px-2 py-3 text-center">
+                    <td class="px-1 py-2 text-center whitespace-nowrap">
                         {% set color = 'bg-red-500/20 text-red-400' if p.score >= 70
                                        else 'bg-yellow-500/20 text-yellow-400' if p.score >= 40
                                        else 'bg-green-500/20 text-green-400' if p.score >= 15
                                        else 'bg-gray-700/50 text-gray-400' %}
                         <span class="score-badge {{ color }}">{{ '%.1f' | format(p.score) }}</span>
                     </td>
-                    <td class="px-2 py-3 text-center">
+                    <td class="px-1 py-2 text-center whitespace-nowrap">
                         {% if p.sparkline | length >= 2 %}
                             {% set scores = p.sparkline %}
                             {% set min_s = scores | min %}
@@ -237,22 +268,22 @@
                             <span class="text-gray-600">—</span>
                         {% endif %}
                     </td>
-                    <td class="px-2 py-3 text-center text-gray-300">{{ '%.1f' | format(p.search_accel) }}</td>
-                    <td class="px-2 py-3 text-center text-gray-300">{{ '%.1f' | format(p.social_velocity) }}</td>
-                    <td class="px-2 py-3 text-center text-gray-300">{{ '%.1f' | format(p.amazon_accel) }}</td>
-                    <td class="px-2 py-3 text-center text-gray-300">{{ '%.1f' | format(p.price_fit) }}</td>
-                    <td class="px-2 py-3 text-center">
+                    <td class="px-1 py-2 text-center text-gray-300 whitespace-nowrap">{{ '%.1f' | format(p.search_accel) }}</td>
+                    <td class="px-1 py-2 text-center text-gray-300 whitespace-nowrap">{{ '%.1f' | format(p.social_velocity) }}</td>
+                    <td class="px-1 py-2 text-center text-gray-300 whitespace-nowrap">{{ '%.1f' | format(p.amazon_accel) }}</td>
+                    <td class="px-1 py-2 text-center text-gray-300 whitespace-nowrap">{{ '%.1f' | format(p.price_fit) }}</td>
+                    <td class="px-1 py-2 text-center whitespace-nowrap">
                         {% set s_val = p.sentiment %}
                         {% set s_color = 'text-green-400' if s_val >= 60
                                          else 'text-red-400' if s_val <= 40
                                          else 'text-gray-400' %}
                         <span class="{{ s_color }}">{{ '%.0f' | format(s_val) }}</span>
                     </td>
-                    <td class="px-2 py-3 text-center text-gray-300">{{ '%.1f' | format(p.purchase_intent) }}</td>
-                    <td class="px-2 py-3 text-center">
+                    <td class="px-1 py-2 text-center text-gray-300 whitespace-nowrap">{{ '%.1f' | format(p.purchase_intent) }}</td>
+                    <td class="px-1 py-2 text-center whitespace-nowrap">
                         <span class="font-mono text-gray-300">{{ p.platform_count }}</span>
                     </td>
-                    <td class="px-2 py-3 text-right text-gray-500 text-xs">
+                    <td class="px-1 py-2 text-right text-gray-500 text-xs whitespace-nowrap">
                         {% if p.first_seen %}{{ p.first_seen.strftime('%b %d') }}{% endif %}
                     </td>
                 </tr>

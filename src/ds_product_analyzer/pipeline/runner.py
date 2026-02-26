@@ -317,14 +317,14 @@ async def _enrich_source_urls(session: AsyncSession, signals: list[RawSignalData
 
 
 async def run_price_enrichment():
-    """Fetch current prices for products with known Amazon URLs."""
-    from ds_product_analyzer.collectors.amazon import fetch_product_price
+    """Fetch current prices and BSR for products with known Amazon URLs."""
+    from ds_product_analyzer.collectors.amazon import fetch_product_details
 
     async with async_session_factory() as session:
         products = (
             await session.execute(
                 select(Product).where(
-                    Product.source_url.like("%amazon.com/dp/%")
+                    Product.source_url.like("%/dp/%")
                 )
             )
         ).scalars().all()
@@ -332,18 +332,27 @@ async def run_price_enrichment():
     logger.info("Price enrichment: %d products with Amazon URLs", len(products))
     enriched = 0
     for product in products:
-        price = await asyncio.to_thread(fetch_product_price, product.source_url)
-        if price is None:
+        details = await asyncio.to_thread(fetch_product_details, product.source_url)
+        price   = details["price"]
+        bsr     = details["bsr_rank"]
+        bsr_cat = details["bsr_category"]
+
+        if price is None and bsr is None:
             continue
+
         async with async_session_factory() as session:
             product_row = await session.get(Product, product.id)
             if product_row:
-                await _write_price_for_product(session, product_row, price, "amazon")
+                if price is not None:
+                    await _write_price_for_product(session, product_row, price, "amazon")
+                if bsr is not None:
+                    product_row.amazon_bsr_rank = bsr
+                    product_row.amazon_bsr_category = bsr_cat
                 await session.commit()
                 enriched += 1
         await asyncio.sleep(settings.amazon_rate_limit_secs)
 
-    logger.info("Price enrichment complete: %d prices updated", enriched)
+    logger.info("Price enrichment complete: %d products updated", enriched)
     return enriched
 
 
@@ -369,21 +378,27 @@ async def run_full_pipeline():
     shopify_count = 0
     aliexpress_count = 0
 
-    try:
-        google_count = await run_google_collection()
-    except Exception as e:
-        logger.error("Google collection failed: %s", e)
+    # try:
+    #     google_count = await run_google_collection()
+    # except Exception as e:
+    #     logger.error("Google collection failed: %s", e)
 
-    try:
-        reddit_count = await run_reddit_collection()
-    except Exception as e:
-        logger.error("Reddit collection failed: %s", e)
+    # try:
+    #     reddit_count = await run_reddit_collection()
+    # except Exception as e:
+    #     logger.error("Reddit collection failed: %s", e)
 
     try:
         amazon_count = await run_amazon_collection()
     except Exception as e:
         logger.error("Amazon collection failed: %s", e)
 
+    enriched = 0
+    try:
+        enriched = await run_price_enrichment()
+    except Exception as e:
+        logger.error("Price enrichment failed: %s", e)
+    '''
     try:
         tiktok_count = await run_tiktok_collection()
     except Exception as e:
@@ -413,18 +428,19 @@ async def run_full_pipeline():
         aliexpress_count = await run_aliexpress_collection()
     except Exception as e:
         logger.error("AliExpress collection failed: %s", e)
-
+    '''
     scored = await run_scoring()
     logger.info(
-        "=== Pipeline complete: google=%d reddit=%d amazon=%d tiktok=%d "
+        "=== Pipeline complete: google=%d reddit=%d amazon=%d enriched=%d tiktok=%d "
         "etsy=%d walmart=%d target=%d shopify=%d aliexpress=%d scored=%d ===",
-        google_count, reddit_count, amazon_count, tiktok_count,
+        google_count, reddit_count, amazon_count, enriched, tiktok_count,
         etsy_count, walmart_count, target_count, shopify_count, aliexpress_count, scored,
     )
     return {
         "google": google_count,
         "reddit": reddit_count,
         "amazon": amazon_count,
+        "enriched": enriched,
         "tiktok": tiktok_count,
         "etsy": etsy_count,
         "walmart": walmart_count,

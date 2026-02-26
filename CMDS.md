@@ -40,3 +40,22 @@ for row in conn.execute('SELECT name, seed_keywords FROM categories'):
     print(f'{row[0]}: {row[1]}')
 conn.close()
 "
+
+
+
+
+# TEST CAPTCHA
+  # Test CAPTCHA logging + price extraction
+.venv/bin/python -c "
+import logging; logging.basicConfig(level=logging.WARNING)
+from ds_product_analyzer.collectors.amazon import fetch_product_details
+r = fetch_product_details('https://www.amazon.com/dp/B0FNRGQL7P')
+print(r)
+"
+
+ # Run enrichment and watch CAPTCHA rate
+.venv/bin/python -c "
+import asyncio
+from ds_product_analyzer.pipeline.runner import run_price_enrichment
+asyncio.run(run_price_enrichment())
+"

@@ -82,6 +82,44 @@ def _parse_price(text: str) -> float | None:
         return None
 
 
+def _extract_asin(url: str) -> str | None:
+    """Extract ASIN from an Amazon product URL."""
+    if not url:
+        return None
+    m = re.search(r"/dp/([A-Z0-9]{10})", url)
+    return m.group(1) if m else None
+
+
+def _parse_bsr_rank(text: str) -> int | None:
+    """Parse a BSR badge like '#1,204' into an integer."""
+    if not text:
+        return None
+    cleaned = re.sub(r"[^\d]", "", text)
+    try:
+        return int(cleaned) if cleaned else None
+    except ValueError:
+        return None
+
+
+def _parse_review_count(text: str) -> int | None:
+    """Parse a review count string like '4,821' or '4.8K' into an integer."""
+    if not text:
+        return None
+    text = text.strip()
+    # Handle "4.8K" style
+    k_match = re.match(r"([\d.]+)[Kk]", text)
+    if k_match:
+        try:
+            return int(float(k_match.group(1)) * 1000)
+        except ValueError:
+            return None
+    cleaned = re.sub(r"[^\d]", "", text)
+    try:
+        return int(cleaned) if cleaned else None
+    except ValueError:
+        return None
+
+
 def _parse_products(html: str) -> list[dict]:
     """Extract product data from a Movers & Shakers page."""
     soup = BeautifulSoup(html, "html.parser")
@@ -116,10 +154,10 @@ def _parse_products(html: str) -> list[dict]:
 
         # Price — cascade from exact legacy class to attribute-contains fallbacks
         CARD_PRICE_SELECTORS = [
+            "span.a-price .a-offscreen",         # most reliable modern hidden price
             ".p13n-sc-price",
             "[class*='p13n-sc-price']",
             "[class*='sc-price']",
-            "span.a-price .a-offscreen",
             ".a-color-price",
         ]
         price_el = None
@@ -142,30 +180,150 @@ def _parse_products(html: str) -> list[dict]:
         href = link_el.get("href", "") if link_el else ""
         product["product_url"] = f"https://www.amazon.com{href}" if href.startswith("/") else href or None
 
+        # ASIN — always extractable from the product URL
+        product["asin"] = _extract_asin(product.get("product_url"))
+
+        # BSR rank — try multiple badge selectors
+        bsr_el = (
+            card.select_one(".zg-bdg-text")
+            or card.select_one(".p13n-sc-badge-label")
+            or card.select_one("[class*='zg-badge'] span")
+            or card.select_one("[class*='zg-bdg'] span")
+        )
+        product["bsr_rank"] = _parse_bsr_rank(bsr_el.get_text(strip=True) if bsr_el else None)
+
+        # Review count — the count lives in the ratings link inside .a-icon-row
+        review_count = None
+        rev_el = (
+            card.select_one(".a-icon-row a[href*='reviews'] .a-size-small")
+            or card.select_one(".a-icon-row .a-size-small")
+            or card.select_one("a[href*='customerReviews'] span")
+        )
+        if rev_el:
+            txt = rev_el.get_text(strip=True)
+            if re.search(r"\d{2,}", txt):
+                review_count = _parse_review_count(txt)
+        product["review_count"] = review_count
+
         if product["name"]:
             products.append(product)
 
     return products
 
 
-def fetch_product_price(url: str) -> float | None:
-    """Fetch current price from an Amazon product detail page."""
+_CAPTCHA_MARKERS = (
+    "/errors/validateCaptcha",
+    "Type the characters you see in this image",
+    "Enter the characters you see below",
+    "Sorry, we just need to make sure you're not a robot",
+)
+
+
+def fetch_product_details(url: str) -> dict:
+    """Fetch price and BSR from an Amazon product detail page.
+
+    Returns a dict with keys: price (float|None), bsr_rank (int|None), bsr_category (str|None).
+    """
+    # Strip M&S referral params — clean URL reduces bot-detection risk
+    asin = _extract_asin(url)
+    if asin:
+        url = f"https://www.amazon.com/dp/{asin}"
+
     PRICE_SELECTORS = [
         "#corePriceDisplay_desktop_feature_div .a-price .a-offscreen",
+        "#apex_offerDisplay_desktop .a-price .a-offscreen",      # modern layout
         "#priceblock_ourprice",
         "#priceblock_dealprice",
-        "span.a-price .a-offscreen",
+        ".a-price .a-offscreen",                                  # broadened fallback
     ]
+    result: dict = {"price": None, "bsr_rank": None, "bsr_category": None}
+
     with httpx.Client(headers=HEADERS, timeout=20.0) as client:
         resp = client.get(url, follow_redirects=True)
-    if resp.status_code != 200 or "captcha" in resp.text.lower():
-        return None
+    is_captcha = any(marker in resp.text for marker in _CAPTCHA_MARKERS)
+    if resp.status_code != 200 or is_captcha:
+        logger.warning("fetch_product_details: CAPTCHA or non-200 (%d) for %s", resp.status_code, url)
+        return result
+
     soup = BeautifulSoup(resp.text, "html.parser")
+
+    # Price
     for sel in PRICE_SELECTORS:
         el = soup.select_one(sel)
         if el:
-            return _parse_price(el.get_text(strip=True))
-    return None
+            result["price"] = _parse_price(el.get_text(strip=True))
+            break
+
+    # Fallback: split price display (.a-price-whole + .a-price-fraction)
+    if result["price"] is None:
+        whole = soup.select_one(".a-price-whole")
+        frac  = soup.select_one(".a-price-fraction")
+        if whole:
+            raw = whole.get_text(strip=True).rstrip(".") + "." + (frac.get_text(strip=True) if frac else "00")
+            result["price"] = _parse_price(raw)
+
+    # Fallback: JSON-LD structured data
+    if result["price"] is None:
+        import json
+        for script in soup.select('script[type="application/ld+json"]'):
+            try:
+                data = json.loads(script.string or "")
+                offers = data.get("offers") or {}
+                if isinstance(offers, list):
+                    offers = offers[0] if offers else {}
+                price_str = offers.get("price") or offers.get("lowPrice")
+                if price_str:
+                    result["price"] = _parse_price(str(price_str))
+                    break
+            except (json.JSONDecodeError, AttributeError):
+                continue
+
+    # BSR — Layout A: #detailBulletsWrapper_feature_div
+    bsr_text: str | None = None
+    bullets_div = soup.select_one("#detailBulletsWrapper_feature_div")
+    if bullets_div:
+        for bold in bullets_div.select("span.a-text-bold"):
+            if "Best Sellers Rank" in bold.get_text():
+                parent = bold.parent
+                if parent:
+                    full_text = parent.get_text(" ", strip=True)
+                    if re.search(r"#[\d,]+", full_text):
+                        bsr_text = full_text
+                        break
+
+    # BSR — Layout B: productDetails table
+    if not bsr_text:
+        for th in soup.select("th"):
+            if "Best Sellers Rank" in th.get_text():
+                td = th.find_next_sibling("td")
+                if td:
+                    bsr_text = td.get_text(" ", strip=True)
+                    break
+
+    if bsr_text:
+        # Extract first rank number e.g. "#1,234" → 1234
+        rank_match = re.search(r"#([\d,]+)", bsr_text)
+        if rank_match:
+            try:
+                result["bsr_rank"] = int(rank_match.group(1).replace(",", ""))
+            except ValueError:
+                pass
+        # Extract category name — stop before parenthetical links like "(See Top 100...)"
+        cat_match = re.search(r"#[\d,]+\s+in\s+([^(#\n]+?)(?:\s*[\(#\n]|$)", bsr_text)
+        if cat_match:
+            result["bsr_category"] = cat_match.group(1).strip()
+
+    if result["bsr_rank"]:
+        logger.debug("BSR found for %s: #%d in %s", url, result["bsr_rank"], result["bsr_category"])
+    else:
+        logger.debug("BSR not found for %s", url)
+
+    return result
+
+
+def fetch_product_price(url: str) -> float | None:
+    """Fetch current price from an Amazon product detail page (thin wrapper)."""
+    return fetch_product_details(url)["price"]
 
 
 class AmazonMoversCollector(BaseCollector):
@@ -202,7 +360,12 @@ class AmazonMoversCollector(BaseCollector):
                         break
 
                     # CAPTCHA detection
-                    if "captcha" in resp.text.lower() or len(resp.text) < 1000:
+                    is_captcha_page = any(m in resp.text for m in (
+                        "/errors/validateCaptcha",
+                        "Type the characters you see in this image",
+                        "Enter the characters you see below",
+                    ))
+                    if is_captcha_page or len(resp.text) < 1000:
                         logger.warning("Amazon CAPTCHA or empty response for %s page %d", cat_name, page)
                         break
 
@@ -230,6 +393,9 @@ class AmazonMoversCollector(BaseCollector):
                                     "image_url": product.get("image_url"),
                                     "rating": product.get("rating"),
                                     "product_url": product.get("product_url"),
+                                    "asin": product.get("asin"),
+                                    "bsr_rank": product.get("bsr_rank"),
+                                    "review_count": product.get("review_count"),
                                 },
                             ))
 
@@ -244,6 +410,9 @@ class AmazonMoversCollector(BaseCollector):
                                 "price": product.get("price"),
                                 "image_url": product.get("image_url"),
                                 "product_url": product.get("product_url"),
+                                "asin": product.get("asin"),
+                                "bsr_rank": product.get("bsr_rank"),
+                                "review_count": product.get("review_count"),
                             },
                         ))
 
