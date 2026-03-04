@@ -35,6 +35,7 @@ CATEGORY_SLUGS = {
 }
 
 BASE_URL = "https://www.amazon.com/gp/movers-and-shakers/{slug}/"
+SEARCH_BASE = "https://www.amazon.com/s"
 
 HEADERS = {
     "User-Agent": (
@@ -217,6 +218,72 @@ _CAPTCHA_MARKERS = (
     "Enter the characters you see below",
     "Sorry, we just need to make sure you're not a robot",
 )
+
+
+async def search_products(keyword: str, limit: int = 20, num_pages: int = 2) -> list[dict]:
+    """Search Amazon by keyword and return results sorted by review count desc."""
+    results: dict[str, dict] = {}  # keyed by ASIN for dedup
+    async with httpx.AsyncClient(headers=HEADERS, timeout=20.0, follow_redirects=True) as client:
+        for page in range(1, num_pages + 1):
+            if page > 1:
+                await asyncio.sleep(1.0)
+            params = {"k": keyword, "page": str(page)}
+            try:
+                resp = await client.get(SEARCH_BASE, params=params)
+            except httpx.HTTPError as e:
+                logger.warning("search_products: HTTP error page %d: %s", page, e)
+                break
+            if resp.status_code != 200 or any(m in resp.text for m in _CAPTCHA_MARKERS):
+                logger.warning("search_products: CAPTCHA or non-200 (%d) for keyword=%r page=%d", resp.status_code, keyword, page)
+                break
+            soup = BeautifulSoup(resp.text, "html.parser")
+            for card in soup.select('[data-component-type="s-search-result"]'):
+                asin = card.get("data-asin", "")
+                if not asin or asin in results:
+                    continue
+                name_el = card.select_one("h2 span")
+                name = name_el.get_text(strip=True) if name_el else None
+                if not name:
+                    continue
+                link_el = card.select_one("a[href*='/dp/']")
+                href = link_el.get("href", "") if link_el else ""
+                url = f"https://www.amazon.com{href}" if href.startswith("/") else href or None
+                img_el = card.select_one("img.s-image")
+                image = img_el.get("src") if img_el else None
+                price_el = card.select_one("span.a-price .a-offscreen")
+                price = _parse_price(price_el.get_text(strip=True) if price_el else None)
+                rating_el = card.select_one("span.a-icon-alt")
+                rating = rating_el.get_text(strip=True) if rating_el else None
+                # Review count: try specific selectors before broad fallback
+                review_count = None
+                # 1. aria-label="N ratings" on an <a> element (most reliable)
+                rev_el = card.select_one("a[aria-label*='rating']")
+                if rev_el:
+                    review_count = _parse_review_count(rev_el.get("aria-label", ""))
+                # 2. underlined review count span (e.g. "4,821")
+                if not review_count:
+                    rev_el = card.select_one("span.a-size-base.s-underline-text")
+                    if rev_el:
+                        review_count = _parse_review_count(rev_el.get_text(strip=True))
+                # 3. any span.a-size-base whose text looks like a number (int or K-style)
+                if not review_count:
+                    for span in card.select("span.a-size-base"):
+                        txt = span.get_text(strip=True)
+                        if re.match(r"^[\d,]+$", txt) or re.match(r"^[\d.]+[Kk]$", txt):
+                            review_count = _parse_review_count(txt)
+                            if review_count:
+                                break
+                results[asin] = {
+                    "asin": asin,
+                    "name": name,
+                    "url": url,
+                    "image": image,
+                    "price": price,
+                    "rating": rating,
+                    "review_count": review_count or 0,
+                }
+    sorted_results = sorted(results.values(), key=lambda x: x["review_count"], reverse=True)
+    return sorted_results[:limit]
 
 
 def fetch_product_details(url: str) -> dict:

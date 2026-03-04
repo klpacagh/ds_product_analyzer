@@ -1,17 +1,19 @@
+import asyncio
 import json
 import logging
 import re
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ds_product_analyzer.api.app import templates
-from ds_product_analyzer.collectors.amazon import _extract_asin
+from ds_product_analyzer.collectors.amazon import _extract_asin, fetch_product_details, search_products
+from ds_product_analyzer.collectors.tiktok import search_tiktok_videos
 from ds_product_analyzer.db.models import Category, PriceHistory, Product, RawSignal, TrendScore
 from ds_product_analyzer.db.session import get_session
 from ds_product_analyzer.pipeline.recommender import generate_dropshipping_recommendations
@@ -113,7 +115,7 @@ async def dashboard(
             "price_low": p.price_low,
             "price_high": p.price_high,
             "sparkline": history_map.get(p.id, []),
-            "is_confirmed": ts.amazon_accel > 0,
+            "is_confirmed": ts.amazon_accel > 0 or "amazon" in sources_map.get(p.id, []),
             "sources": sources_map.get(p.id, []),
         }
         for p, ts in results
@@ -363,9 +365,9 @@ async def _build_amazon_products(session: AsyncSession) -> list[dict]:
         except (TypeError, ValueError):
             price = None
 
-        # Prefer actual BSR from detail page enrichment; fall back to None (show —)
-        bsr_rank_display = p.amazon_bsr_rank  # shown in BSR column; None → "—"
-        bsr_rank_for_est = p.amazon_bsr_rank  # used for sales/revenue estimates
+        # Prefer actual BSR from detail page enrichment; fall back to M&S signal metadata
+        bsr_rank_display = p.amazon_bsr_rank or meta.get("bsr_rank")
+        bsr_rank_for_est = bsr_rank_display  # used for sales/revenue estimates
 
         est_sales = None
         est_revenue = None
@@ -483,6 +485,54 @@ async def api_products(
         }
         for p, ts in results
     ]
+
+
+@router.get("/api/products/{product_id}/similar")
+async def similar_products(
+    product_id: int,
+    session: AsyncSession = Depends(get_session),
+):
+    """JSON endpoint: similar Amazon products for a given product (by keyword search)."""
+    product = await session.get(Product, product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    results = await search_products(product.canonical_name, limit=20)
+
+    async def enrich(item: dict) -> dict:
+        try:
+            detail = await asyncio.wait_for(
+                asyncio.to_thread(fetch_product_details, item["url"]),
+                timeout=8.0,
+            )
+            item["bsr_rank"] = detail.get("bsr_rank")
+            item["bsr_category"] = detail.get("bsr_category")
+        except Exception:
+            item["bsr_rank"] = None
+            item["bsr_category"] = None
+        return item
+
+    results = await asyncio.gather(*[enrich(r) for r in results])
+    return results
+
+
+@router.get("/api/products/{product_id}/tiktok")
+async def tiktok_buzz(
+    product_id: int,
+    session: AsyncSession = Depends(get_session),
+):
+    """JSON endpoint: TikTok buzz stats for a product (scraped on demand)."""
+    product = await session.get(Product, product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    try:
+        result = await asyncio.wait_for(
+            search_tiktok_videos(product.canonical_name, months=3),
+            timeout=40.0,
+        )
+    except Exception as e:
+        logger.warning("TikTok buzz fetch failed for product %d: %s", product_id, e)
+        result = None
+    return result  # null if scrape failed — frontend handles gracefully
 
 
 @router.get("/api/products/{product_id}")

@@ -452,3 +452,174 @@ class TikTokCollector(BaseCollector):
             len(signals), len(unique_videos),
         )
         return signals
+
+
+# ---------------------------------------------------------------------------
+# Standalone search function (swap body for Research API when approved)
+# ---------------------------------------------------------------------------
+
+async def search_tiktok_videos(keyword: str, months: int = 3) -> dict | None:
+    """Search TikTok for videos mentioning *keyword* and return aggregate stats.
+
+    Uses the same Playwright scraping infrastructure as ``_try_hashtag_scrape``
+    but targets TikTok's search page instead of hashtag pages.  Each intercepted
+    video carries a ``createTime`` Unix timestamp which is used to filter to the
+    requested time window.
+
+    Returns a dict with aggregate stats, or ``None`` on failure (TikTok blocked
+    the headless browser, no results found, etc.).
+
+    When TikTok Research API access is approved, replace this function's body
+    with a REST call to ``/v2/research/video/query/``; the endpoint and frontend
+    remain unchanged.
+    """
+    import time
+    import urllib.parse
+
+    from playwright.async_api import async_playwright
+
+    # Ensure bundled browser libs are on LD_LIBRARY_PATH (WSL2 compat).
+    local_libs = Path(__file__).resolve().parents[3] / ".local-libs" / "lib"
+    if local_libs.is_dir():
+        existing = os.environ.get("LD_LIBRARY_PATH", "")
+        if str(local_libs) not in existing:
+            os.environ["LD_LIBRARY_PATH"] = (
+                f"{local_libs}:{existing}" if existing else str(local_libs)
+            )
+
+    from playwright_stealth import stealth_async
+
+    cutoff_ts = time.time() - months * 30 * 86400
+    all_videos: list[dict] = []
+
+    async def _on_response(response):
+        if "tiktok.com" not in response.url:
+            return
+        content_type = response.headers.get("content-type", "")
+        if "json" not in content_type:
+            return
+        try:
+            body = await response.json()
+            logger.debug("TikTok response URL: %s", response.url[:150])
+            # Accept any response that looks like a video list
+            for key in ("itemList", "item_list"):
+                items = body.get(key)
+                if items:
+                    all_videos.extend(items)
+                    break
+            # Also try nested data.itemList
+            data = body.get("data", {})
+            if isinstance(data, dict):
+                items = data.get("itemList", data.get("item_list", []))
+                if items:
+                    all_videos.extend(items)
+        except Exception:
+            pass
+
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            context = await browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/131.0.0.0 Safari/537.36"
+                ),
+                viewport={"width": 1280, "height": 720},
+                locale="en-US",
+            )
+            page = await context.new_page()
+            await stealth_async(page)
+            page.on("response", _on_response)
+
+            encoded = urllib.parse.quote(keyword)
+            url = f"https://www.tiktok.com/search/video?q={encoded}"
+            try:
+                await page.goto(url, wait_until="networkidle", timeout=30000)
+                # Allow initial API calls to complete
+                await asyncio.sleep(3)
+                # Scroll to trigger more results
+                for _ in range(3):
+                    await page.evaluate("window.scrollBy(0, 800)")
+                    await asyncio.sleep(2)
+            except Exception as e:
+                logger.debug("TikTok search page navigation failed: %s", e)
+
+            await browser.close()
+
+    except Exception as e:
+        logger.warning("TikTok search scrape failed: %s", e)
+        return None
+
+    if not all_videos:
+        logger.warning("TikTok search scrape: no videos captured for %r", keyword)
+        return None
+
+    # Deduplicate by video ID
+    seen_ids: set[str] = set()
+    unique_videos: list[dict] = []
+    for v in all_videos:
+        vid = v.get("id", "")
+        if vid and vid in seen_ids:
+            continue
+        seen_ids.add(vid)
+        unique_videos.append(v)
+
+    # Filter to the requested time window
+    windowed: list[dict] = []
+    for v in unique_videos:
+        create_time = v.get("createTime", 0)
+        if create_time and create_time >= cutoff_ts:
+            windowed.append(v)
+
+    if not windowed:
+        # Fall back to all captured videos if none pass the date filter
+        # (TikTok may not return createTime for all items)
+        windowed = unique_videos
+
+    # Aggregate stats
+    total_views = 0
+    total_likes = 0
+    total_shares = 0
+    total_comments = 0
+    top_videos: list[dict] = []
+
+    for v in windowed:
+        stats = v.get("stats", {})
+        plays = stats.get("playCount", 0) or 0
+        likes = stats.get("diggCount", 0) or 0
+        shares = stats.get("shareCount", 0) or 0
+        comments = stats.get("commentCount", 0) or 0
+        total_views += plays
+        total_likes += likes
+        total_shares += shares
+        total_comments += comments
+
+        video_id = v.get("id", "")
+        author = v.get("author", {}).get("uniqueId", "")
+        video_url = (
+            f"https://www.tiktok.com/@{author}/video/{video_id}"
+            if author and video_id
+            else None
+        )
+        top_videos.append({
+            "url": video_url,
+            "views": plays,
+            "likes": likes,
+            "desc": v.get("desc", "")[:120],
+        })
+
+    # Top 5 by view count
+    top_videos.sort(key=lambda x: x["views"], reverse=True)
+    top_videos = top_videos[:5]
+
+    return {
+        "keyword": keyword,
+        "months": months,
+        "video_count": len(windowed),
+        "total_views": total_views,
+        "total_likes": total_likes,
+        "total_shares": total_shares,
+        "total_comments": total_comments,
+        "top_videos": top_videos,
+    }

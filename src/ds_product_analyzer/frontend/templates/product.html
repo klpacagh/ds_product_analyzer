@@ -259,6 +259,74 @@
             <p class="text-gray-500 text-sm p-6 text-center">No signals collected yet.</p>
             {% endif %}
         </div>
+        <!-- TikTok Buzz -->
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-6">
+            <div class="flex items-center gap-2 mb-4">
+                <svg class="w-5 h-5 text-pink-400" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1V9.01a6.33 6.33 0 00-.79-.05 6.34 6.34 0 00-6.34 6.34 6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.33-6.34V8.69a8.27 8.27 0 004.84 1.55V6.79a4.85 4.85 0 01-1.07-.1z"/>
+                </svg>
+                <h2 class="text-lg font-semibold">TikTok Buzz <span class="text-gray-500 text-sm font-normal">(past 3 months)</span></h2>
+            </div>
+            <div id="tiktok-loading" class="flex justify-center py-8">
+                <svg class="animate-spin h-8 w-8 text-pink-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+            </div>
+            <div id="tiktok-unavailable" class="hidden text-center py-6 text-gray-500 text-sm">
+                TikTok data unavailable (scrape blocked or no results).
+            </div>
+            <div id="tiktok-content" class="hidden">
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+                    <div class="text-center">
+                        <div id="tt-videos" class="text-2xl font-bold text-pink-400">—</div>
+                        <div class="text-xs text-gray-500 mt-1">Videos</div>
+                    </div>
+                    <div class="text-center">
+                        <div id="tt-views" class="text-2xl font-bold text-pink-400">—</div>
+                        <div class="text-xs text-gray-500 mt-1">Total Views</div>
+                    </div>
+                    <div class="text-center">
+                        <div id="tt-likes" class="text-2xl font-bold text-pink-400">—</div>
+                        <div class="text-xs text-gray-500 mt-1">Total Likes</div>
+                    </div>
+                    <div class="text-center">
+                        <div id="tt-shares" class="text-2xl font-bold text-pink-400">—</div>
+                        <div class="text-xs text-gray-500 mt-1">Total Shares</div>
+                    </div>
+                </div>
+                <div id="tt-top-videos" class="space-y-2"></div>
+            </div>
+        </div>
+
+        <!-- Similar Products on Amazon -->
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-6">
+            <h2 class="text-lg font-semibold mb-4">Similar Products on Amazon</h2>
+            <div id="similar-loading" class="flex justify-center py-8">
+                <svg class="animate-spin h-8 w-8 text-yellow-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+            </div>
+            <div id="similar-error" class="hidden text-center py-6 text-gray-500 text-sm">
+                Could not load similar products.
+            </div>
+            <div id="similar-table" class="hidden overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wider">
+                            <th class="px-4 py-2 text-left">Product</th>
+                            <th class="px-4 py-2 text-right">Price</th>
+                            <th class="px-4 py-2 text-right">Rating</th>
+                            <th class="px-4 py-2 text-right">Reviews</th>
+                            <th class="px-4 py-2 text-right">BSR</th>
+                            <th class="px-4 py-2 text-right">Link</th>
+                        </tr>
+                    </thead>
+                    <tbody id="similar-tbody"></tbody>
+                </table>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -343,4 +411,101 @@ new Chart(priceCtx, {
 });
 </script>
 {% endif %}
+
+<script>
+// --- TikTok Buzz loader ---
+(function () {
+    function fmtNum(n) {
+        if (n == null) return '—';
+        if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+        if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+        return n.toLocaleString();
+    }
+
+    fetch('/api/products/{{ product.id }}/tiktok')
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+        .then(function (data) {
+            document.getElementById('tiktok-loading').classList.add('hidden');
+            if (!data) {
+                document.getElementById('tiktok-unavailable').classList.remove('hidden');
+                return;
+            }
+            document.getElementById('tt-videos').textContent = fmtNum(data.video_count);
+            document.getElementById('tt-views').textContent  = fmtNum(data.total_views);
+            document.getElementById('tt-likes').textContent  = fmtNum(data.total_likes);
+            document.getElementById('tt-shares').textContent = fmtNum(data.total_shares);
+
+            var topEl = document.getElementById('tt-top-videos');
+            if (data.top_videos && data.top_videos.length > 0) {
+                var header = document.createElement('p');
+                header.className = 'text-xs text-gray-500 uppercase tracking-wider mb-2';
+                header.textContent = 'Top Videos';
+                topEl.appendChild(header);
+                data.top_videos.forEach(function (v) {
+                    var div = document.createElement('div');
+                    div.className = 'flex items-start gap-2 py-2 border-b border-gray-800/50';
+                    var views = '<span class="text-pink-400 font-mono text-xs shrink-0">' + fmtNum(v.views) + ' views</span>';
+                    var desc = '<span class="text-gray-300 text-sm truncate">' + (v.desc || '(no description)') + '</span>';
+                    var link = v.url
+                        ? '<a href="' + v.url + '" target="_blank" rel="noopener noreferrer" class="text-pink-400 hover:text-pink-300 text-xs shrink-0 ml-auto">View &rarr;</a>'
+                        : '';
+                    div.innerHTML = views + desc + link;
+                    topEl.appendChild(div);
+                });
+            }
+
+            document.getElementById('tiktok-content').classList.remove('hidden');
+        })
+        .catch(function () {
+            document.getElementById('tiktok-loading').classList.add('hidden');
+            document.getElementById('tiktok-unavailable').classList.remove('hidden');
+        });
+}());
+</script>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const table = document.getElementById('similar-table');
+    const tbody = document.getElementById('similar-tbody');
+    const loading = document.getElementById('similar-loading');
+    const error = document.getElementById('similar-error');
+
+    fetch('/api/products/{{ product.id }}/similar')
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+        .then(function (items) {
+            loading.classList.add('hidden');
+            if (!items || items.length === 0) {
+                error.classList.remove('hidden');
+                return;
+            }
+            items.forEach(function (p) {
+                const stars = p.rating ? p.rating.replace(' out of 5 stars', '') : '—';
+                const price = p.price != null ? '$' + p.price.toFixed(2) : '—';
+                const reviews = p.review_count ? p.review_count.toLocaleString() : '—';
+                const bsr = p.bsr_rank ? '#' + p.bsr_rank.toLocaleString() : '—';
+                const tr = document.createElement('tr');
+                tr.className = 'border-b border-gray-800/50 hover:bg-gray-800/30';
+                tr.innerHTML =
+                    '<td class="px-4 py-2 text-gray-200">' + p.name + '</td>' +
+                    '<td class="px-4 py-2 text-right text-green-400 font-mono">' + price + '</td>' +
+                    '<td class="px-4 py-2 text-right text-yellow-400">&#9733; ' + stars + '</td>' +
+                    '<td class="px-4 py-2 text-right text-gray-300">' + reviews + '</td>' +
+                    '<td class="px-4 py-2 text-right text-blue-400 font-mono">' + bsr + '</td>' +
+                    '<td class="px-4 py-2 text-right">' +
+                        '<a href="' + p.url + '" target="_blank" rel="noopener noreferrer" ' +
+                           'class="text-yellow-400 hover:text-yellow-300 text-xs font-medium">' +
+                            'View &rarr;' +
+                        '</a>' +
+                    '</td>';
+                tbody.appendChild(tr);
+            });
+            table.classList.remove('hidden');
+        })
+        .catch(function () {
+            loading.classList.add('hidden');
+            error.classList.remove('hidden');
+        });
+});
+</script>
 {% endblock %}
